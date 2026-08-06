@@ -27,8 +27,12 @@ design discussion, never a patch.
 - **INV-2 — Dependency rule.** `domain/` imports nothing external; `services/` imports
   domain only and defines all ports; `infrastructure/` implements ports. Inner layers
   never import from outer ones.
-- **INV-3 — Single user.** One `User` row, one connection at a time, no auth. Design
-  decisions may rely on this.
+- **INV-3 — Single user per schema.** One `User` row, one connection at a time, no
+  auth, within the one Postgres schema a running deployment targets (`[database]
+  schema`, wizard-decided, immutable — TR-5xx). Several independent schemas may coexist
+  in one database (one per family member), but nothing about concurrency changes: a
+  deployment/config always targets exactly one schema, and design decisions may rely on
+  single-user *within it*.
 - **INV-4 — No barge-in.** The response plays to completion; the mic re-opens only on
   `speaking_end`.
 - **INV-5 — Session logs are kept forever.** No rotation or cleanup logic anywhere.
@@ -99,11 +103,15 @@ design discussion, never a patch.
   never from strategy code.
 - **TR-006** Two independent Postgres connections: `conn` for the live path (event-loop
   thread), `offline_conn` for the background pipeline thread — a shared connection
-  would interleave live queries into the offline transaction or block the loop.
+  would interleave live queries into the offline transaction or block the loop. Both
+  are opened against the same `[database] schema` (TR-5xx, INV-3) via `search_path`;
+  nothing ever mixes two schemas on one connection or one deployment.
 - **TR-007** `ConsolidateMemory`, `EnrichMemory`, and replay are synchronous by design
   and must be dispatched via `asyncio.to_thread` when called from the event loop; brief
   generation streams async and is awaited directly.
-- **TR-008** The one `User` row is bootstrapped by the server on startup when missing.
+- **TR-008** The one `User` row is bootstrapped by the server on startup when missing,
+  seeded with `[user] name` (wizard-time, the same alias that became this install's
+  schema slug) or, absent that key, the literal default `"user-1"`.
 
 ## TR-1xx — WebSocket protocol
 
@@ -462,7 +470,23 @@ design discussion, never a patch.
 
 - **TR-501** PostgreSQL 15+ with pgvector; all embeddings `vector(1024)`
   (`multilingual-e5-large`); HNSW cosine indexes on episodes/concepts/procedures.
-- **TR-502** Tables: `users` (singleton), `personas`, `conversations`, `turns`
+- **TR-501b** Every table below lives inside one Postgres schema per installation
+  (INV-3), not `public` directly: the wizard's `SetupSchema` step runs `CREATE SCHEMA
+  IF NOT EXISTS "<schema>"; SET search_path TO "<schema>", public;` before applying
+  `001_initial_schema.sql`, and the server connects with the same `search_path` (TR-006).
+  `public` stays reachable behind the named schema so pgvector's `vector` type resolves
+  from inside every user schema without being reinstalled per schema. This requires
+  pinning it explicitly — `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`,
+  not a bare `CREATE EXTENSION IF NOT EXISTS vector` — since an unqualified extension
+  installs into whichever schema is first on `search_path` at creation time, which
+  would be the *first* family member's own schema, unreachable from every later one.
+  The schema name
+  itself is validated against `^[a-z][a-z0-9_]*$` wherever it reaches a connection string
+  or raw DDL (`domain.slugify.schema_slug` on the wizard side, a duplicate regex check in
+  `infrastructure/postgres.py` and `infrastructure/schema_runner.py` — the two packages
+  share no code, TR-001), since it is not a bindable query parameter.
+- **TR-502** Tables: `users` (singleton *within the schema*, `name` seeded at bootstrap —
+  TR-008), `personas`, `conversations`, `turns`
   (composite PK conversation_id+timestamp; `session_id` indexed for replay
   idempotency), `episodes`, `concepts`, `procedures`, `directives` (FR-207 — not a
   memory type; see TR-510), `bundle_installs` (append-only), `memory_brief`
@@ -757,6 +781,17 @@ only validation layer.
 
 ## TR-95x — Configuration & models
 
+- **TR-950** The wizard's `ConfigureUserIdentity` step (right after
+  `ConfigureDatabaseConnection`) derives the Postgres schema slug from the free-text
+  answer to "who is this install for?" via `domain.slugify.schema_slug`: NFKD-normalise
+  to ASCII, lowercase, collapse every run of characters outside `[a-z0-9_]` to a single
+  `_`, strip a leading digit (not a valid identifier start), fall back to the literal
+  `user_1` when nothing usable survives (blank input, or input with no ASCII residue).
+  The derived slug is shown back to the user as the default for a second prompt they may
+  override outright — `SetupSchema` uses whatever that second prompt returns, not the
+  bare derivation, since the schema becomes immutable once created (FR-709, TR-501b). A
+  blank answer to the identity question itself falls back to the literal display name
+  `"user-1"` (FR-709), independently of what the schema ends up named.
 - **TR-951** Server config `mamemai.toml` (platform config dir; wizard-generated):
   `[server] ws_port=8765, log_dir=<platform data dir>/sessions` (absolute,
   `platformdirs.user_data_dir("mamemai")` — session logs are persistent data, INV-5, not
@@ -764,7 +799,10 @@ only validation layer.
   0 disables session-tail injection entirely — not voice-configurable, FR-701 doesn't
   apply, same technical-tuning-knob posture as `[memory]`'s thresholds below);
   `[database] url` (libpq DSN; peer
-  auth default on Linux/macOS); `[stt] model_path, device cuda|cpu, compute_type`
+  auth default on Linux/macOS), `schema` (TR-501b — wizard-decided, immutable, absent
+  → `"public"`); `[user] name` (bootstrap seed for `User.name`, TR-008 — absent →
+  the literal default `"user-1"`; omitted entirely from a re-run's config that
+  never asked, since there is nothing new to seed); `[stt] model_path, device cuda|cpu, compute_type`
   (float16↔cuda, int8↔cpu), `cpu_threads=8` (see TR-957), `min_utterance_ms=300`
   (see TR-958; 0 disables the floor); `[embedding] device` (absent → auto-detect; see
   TR-960 — set it explicitly, and not necessarily to the same device as `[tts]`);

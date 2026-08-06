@@ -384,6 +384,10 @@ def _compose_working_context(
         # directive would fight the persona's own prompt (which owns language use).
         lang = wm.active_persona.response_language
         prompt_parts.append(f"Always respond in the language with IETF code '{lang.code}'. Never switch language unless explicitly asked.")
+    # Personalization: every persona may address the user by name (User.name,
+    # wizard-seeded at bootstrap; voice-editable only via a future directive, not
+    # this generic composition step — see INV-6, this isn't persona-specific).
+    prompt_parts.append(f"The user's name is '{wm.user.name}'. You may address them by it naturally.")
     if wm.memory_brief:
         prompt_parts.append(wm.memory_brief.content)
     # Honesty about memory, both directions (FR-309/TR-314) — only when the recall

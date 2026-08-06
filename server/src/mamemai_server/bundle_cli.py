@@ -55,7 +55,7 @@ def _install(path: Path) -> int:
     cfg = load_config()
 
     print("Connecting to database…")
-    conn = postgres.connect(cfg.database_url)
+    conn = postgres.connect(cfg.database_url, cfg.database_schema)
     print("Loading embedding model…")
     embedding_service = SentenceTransformerEmbeddingService(device=cfg.embedding_device)
 

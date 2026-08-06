@@ -60,6 +60,19 @@ class InstallationPlan:
     # server/config/mamemai.example.toml. GenerateConfig and SetupSchema both
     # read this field rather than duplicating the literal.
     database_url: str = "postgresql://mamemai:changeme@localhost:5432/mamemai"
+    # Postgres schema this install's data lives in (TR-5xx) — one schema per family
+    # member, so several installs can share one database cheaply. None = not yet
+    # decided; ConfigureUserIdentity sets it once and it is immutable afterward
+    # (SetupSchema creates it, and nothing renames a live schema). A config that
+    # predates this feature has no recorded schema and is treated as "public"
+    # (where its data already lives) rather than prompted — same fallback the
+    # server's own config loader uses.
+    database_schema: str | None = None
+    # Raw text as given to "who is this install for?" — seeds User.name at first
+    # bootstrap only; the DB row is authoritative after that; freely voice-editable
+    # later, unlike database_schema above. None on a re-run that skipped the
+    # question (ConfigureUserIdentity no-ops once database_schema is set).
+    user_display_name: str | None = None
     # True when this plan was pre-filled from a prior install's mamemai.toml
     # (ExistingInstallDetector): steps then present the recorded state as
     # defaults — pre-checked languages, current LLM/Whisper selections, a

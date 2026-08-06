@@ -113,6 +113,43 @@ def test_openai_compatible_provider_writes_api_key_when_present(tmp_path: Path):
     assert config["llm"]["api_key"] == "sk-example"
 
 
+def test_writes_recorded_schema(tmp_path: Path):
+    """Spec: TR-5xx"""
+    plan = InstallationPlan(database_schema="alice")
+
+    config = _write_and_read(tmp_path, plan)
+
+    assert config["database"]["schema"] == "alice"
+
+
+def test_falls_back_to_public_schema_when_plan_has_none(tmp_path: Path):
+    """Spec: TR-5xx — a plan that never ran ConfigureUserIdentity (e.g. a
+    programmatically-built InstallationPlan in a test) still writes a valid config."""
+    plan = InstallationPlan()
+
+    config = _write_and_read(tmp_path, plan)
+
+    assert config["database"]["schema"] == "public"
+
+
+def test_writes_user_name_seed_when_given(tmp_path: Path):
+    """Spec: TR-5xx"""
+    plan = InstallationPlan(user_display_name="Alice")
+
+    config = _write_and_read(tmp_path, plan)
+
+    assert config["user"]["name"] == "Alice"
+
+
+def test_omits_user_section_when_no_display_name_was_collected(tmp_path: Path):
+    """Spec: TR-5xx — a re-run that no-op'd ConfigureUserIdentity has nothing new to seed."""
+    plan = InstallationPlan()
+
+    config = _write_and_read(tmp_path, plan)
+
+    assert "user" not in config
+
+
 def test_written_config_is_only_readable_by_owner(tmp_path: Path):
     # database.url may carry a plaintext password (password-auth fallback) —
     # this file must never be group/world-readable.

@@ -3,7 +3,14 @@
 -- Run once against a fresh database:
 --   psql -d mamemai -f migrations/001_initial_schema.sql
 
-CREATE EXTENSION IF NOT EXISTS vector;
+-- WITH SCHEMA public is load-bearing, not decoration (TR-501b): this file runs with
+-- search_path = "<user_schema>, public" (schema-per-user), and CREATE EXTENSION with
+-- no explicit schema installs into whichever schema is first on the path — the first
+-- family member's own schema, not public. A second family member's schema would then
+-- have no way to resolve the vector type at all, since it isn't on their search path.
+-- Pinning it to public keeps it shared and installed exactly once, regardless of
+-- which schema happens to apply this file first.
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Users (singleton — one record only)
@@ -13,8 +20,13 @@ CREATE TABLE IF NOT EXISTS users (
     id                          UUID             PRIMARY KEY,
     primary_language            TEXT,                           -- NULL until onboarding
     secondary_languages         TEXT[]           NOT NULL DEFAULT '{}',
-    idle_consolidation_minutes  DOUBLE PRECISION NOT NULL DEFAULT 5.0
+    idle_consolidation_minutes  DOUBLE PRECISION NOT NULL DEFAULT 5.0,
+    name                        TEXT             NOT NULL DEFAULT 'user-1'  -- personalization; independent of this install's schema slug (TR-5xx)
 );
+-- Added 2026-08-06 (schema-per-user + personalization). No manual backfill needed,
+-- same posture as reads_across_personas below: NOT NULL DEFAULT is enough for
+-- already-provisioned rows.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT 'user-1';
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Personas (Persona bounded context)

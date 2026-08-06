@@ -47,11 +47,19 @@ class FileExistingInstallDetector:
         stt = raw.get("stt", {})
         llm = raw.get("llm", {})
         languages = raw.get("languages", {})
+        user = raw.get("user", {})
 
         if server.get("ssh_host"):
             plan.set_topology(Topology.SPLIT_HOST)
         if database.get("url"):
             plan.database_url = database["url"]
+        # Immutable once recorded (ConfigureUserIdentity no-ops when this is set) — a
+        # config predating this feature has no "schema" key and stays None here, which
+        # ConfigureUserIdentity itself then treats as "public" (see its docstring).
+        if database.get("schema"):
+            plan.database_schema = database["schema"]
+        if user.get("name"):
+            plan.user_display_name = user["name"]
         if stt.get("model_path"):
             plan.whisper_model = stt["model_path"]
         if stt.get("device"):

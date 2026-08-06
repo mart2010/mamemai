@@ -55,7 +55,16 @@ class TomlConfigWriter:
     def write_server_config(self, plan: InstallationPlan) -> None:
         config = self._read_existing()
         config.setdefault("server", {}).update({"ws_port": _DEFAULT_WS_PORT, "log_dir": _DEFAULT_LOG_DIR})
-        config["database"] = {"url": plan.database_url}
+        # schema (TR-5xx) is immutable once recorded — ConfigureUserIdentity never
+        # re-derives it on a re-run, so this always reflects the original decision
+        # ("public" for a config predating the feature).
+        config["database"] = {"url": plan.database_url, "schema": plan.database_schema or "public"}
+        # Bootstrap seed only (TR-5xx) — read once by the server's _ensure_user_exists
+        # when the users row doesn't exist yet; the DB row is authoritative after that,
+        # so this is harmless to leave written even though nothing re-reads it later.
+        # Omitted when the question was never asked (re-run that no-op'd).
+        if plan.user_display_name:
+            config["user"] = {"name": plan.user_display_name}
         device = plan.compute_device
         config["stt"] = {
             "model_path": plan.whisper_model or "small",

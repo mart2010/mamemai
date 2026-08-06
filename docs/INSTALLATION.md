@@ -99,9 +99,14 @@ CREATE DATABASE mamemai;
 CREATE USER mamemai;
 GRANT ALL PRIVILEGES ON DATABASE mamemai TO mamemai;
 \c mamemai
-GRANT ALL ON SCHEMA public TO mamemai;
+ALTER SCHEMA public OWNER TO mamemai;
 SQL
 ```
+
+The `ALTER SCHEMA` (not just a `GRANT`) matters once schema-per-user is in play
+(TR-501b): the wizard's `SetupSchema` step needs to create/own new schemas inside this
+database, and granting privileges on `public` without transferring its ownership isn't
+enough for that.
 
 This creates the `mamemai` role with **no password**, on purpose — see below.
 
@@ -381,6 +386,13 @@ over. It walks through, in order:
 - **Topology** — single-host or split-host (matching what you picked in step 1).
 - **Database connection** — verifies the Postgres role/database from step 4 (peer auth
   on Linux/macOS, SSPI on Windows, or host+password).
+- **Who is this install for?** — a name (defaults to "user-1" if left blank), used both
+  to personalize replies and, slugified, as the Postgres *schema* this install's data
+  lives in (one schema per family member, inside the one `mamemai` database from step 4
+  — several installs can share it cheaply later). Shown back for confirmation/override
+  before it's created: unlike everything else the wizard asks, the schema can't be
+  changed on a later re-run. Skipped automatically on a re-run once a schema is already
+  recorded.
 - **Prerequisite checks** — Ollama reachable, Postgres/pgvector OK.
 - **Compute device** — detects a CUDA GPU, or falls back to CPU for STT/TTS (Ollama
   detects and uses GPU acceleration for the LLM on its own, independent of this check).
@@ -406,8 +418,9 @@ over. It walks through, in order:
 - **Config file** — writes `~/.config/mamemai/mamemai.toml` (`%LOCALAPPDATA%\mamemai\` on
   Windows), 0600 permissions where supported; shared by server and client on a
   single-host setup.
-- **Database schema** — applies `migrations/001_initial_schema.sql` (idempotent, safe
-  to re-run).
+- **Database schema** — creates this install's Postgres schema (from the name above)
+  and applies `migrations/001_initial_schema.sql` inside it (idempotent, safe to
+  re-run).
 - **Health checks** — confirms Ollama is reachable.
 
 If a download step fails (network hiccup, SSL error), the wizard reports it and moves
@@ -416,7 +429,7 @@ instead, which is slower on first launch. Re-run `mamemai-setup` afterwards to r
 pre-download.
 
 `mamemai-server` bootstraps the single `User` row itself on first connect — no manual
-`INSERT` needed.
+`INSERT` needed — seeded with the name given above (or "user-1" if none was).
 
 ---
 

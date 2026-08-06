@@ -83,6 +83,14 @@ class ServerConfig:
     ws_port: int
     log_dir: Path
     database_url: str
+    # Postgres schema this install's data lives in (INV-3, TR-5xx) — wizard-decided,
+    # immutable after SetupSchema creates it. "public" for a config predating this
+    # feature (its data is already there) or with no [database].schema key at all.
+    database_schema: str
+    # Seeds User.name (personalization) the one time the users row is bootstrapped —
+    # read once, then the DB row is authoritative; None when the wizard's identity
+    # question never ran (e.g. a re-run against an already-bootstrapped install).
+    user_name_seed: str | None
     stt_model_path: str
     stt_device: str
     stt_compute_type: str
@@ -167,6 +175,8 @@ def load_config(path: Path = CONFIG_PATH) -> ServerConfig:
         ws_port=int(server.get("ws_port", 8765)),
         log_dir=Path(server.get("log_dir")) if server.get("log_dir") else _DEFAULT_LOG_DIR,
         database_url=db.get("url", "postgresql://mamemai:changeme@localhost:5432/mamemai"),
+        database_schema=db.get("schema", "public"),
+        user_name_seed=raw.get("user", {}).get("name") or None,
         stt_model_path=str(Path(stt.get("model_path", "~/models/faster-whisper-small")).expanduser()),
         stt_device=stt.get("device", "cpu"),
         stt_compute_type=stt.get("compute_type", "int8"),

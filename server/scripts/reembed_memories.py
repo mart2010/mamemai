@@ -53,7 +53,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    conn = postgres.connect(cfg.database_url)
+    conn = postgres.connect(cfg.database_url, cfg.database_schema)
 
     rows: dict[str, list[tuple[int, str]]] = {}
     with conn.cursor() as cur:

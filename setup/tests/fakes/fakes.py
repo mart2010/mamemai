@@ -146,9 +146,11 @@ class FakeConfigWriter:
 class FakeSchemaRunner:
     def __init__(self) -> None:
         self.applied_to: list[str] = []
+        self.applied_schemas: list[str] = []
 
-    def apply_schema(self, database_url: str) -> None:
+    def apply_schema(self, database_url: str, schema: str) -> None:
         self.applied_to.append(database_url)
+        self.applied_schemas.append(schema)
 
 
 class FakeConnectionVerifier:

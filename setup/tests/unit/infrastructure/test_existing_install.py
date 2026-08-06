@@ -54,6 +54,30 @@ def test_prefills_plan_from_existing_config(tmp_path: Path):
     assert plan.topology is None
 
 
+def test_prefills_schema_and_user_name_when_present(tmp_path: Path):
+    """Spec: TR-5xx — schema is recorded as immutable state; ConfigureUserIdentity
+    reads it to skip re-asking."""
+    content = (
+        '[database]\nurl = "postgresql://mamemai@localhost/mamemai"\nschema = "alice"\n\n'
+        '[user]\nname = "Alice"\n'
+    )
+    plan = _detector(tmp_path, content).load_existing_plan()
+
+    assert plan is not None
+    assert plan.database_schema == "alice"
+    assert plan.user_display_name == "Alice"
+
+
+def test_schema_absent_leaves_plan_schema_none(tmp_path: Path):
+    """Spec: TR-5xx — a config predating this feature has no [database].schema key;
+    ConfigureUserIdentity itself, not this detector, decides that means "public"."""
+    plan = _detector(tmp_path, _FULL_CONFIG).load_existing_plan()
+
+    assert plan is not None
+    assert plan.database_schema is None
+    assert plan.user_display_name is None
+
+
 def test_ssh_host_marks_split_host_topology(tmp_path: Path):
     plan = _detector(tmp_path, '[server]\nws_port = 8765\nssh_host = "gpu-box"\n').load_existing_plan()
 

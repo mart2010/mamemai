@@ -11,6 +11,7 @@ from ..domain.languages import format_language
 from ..domain.model import FitLevel
 from ..domain.plan import InstallationPlan, Topology, masked_database_url
 from ..domain.services import LLM_SELECTION_HEADROOM_GB, STT_SELECTION_TTS_HEADROOM_GB, assess_fit
+from ..domain.slugify import schema_slug
 from .errors import WizardAborted
 from .ports import (
     CatalogueRepository,
@@ -223,6 +224,43 @@ class ConfigureDatabaseConnection:
             "then restart the PostgreSQL service (Services app, or an admin PowerShell: "
             "`Restart-Service postgresql-x64-<version>`) and re-run mamemai-setup."
         )
+
+
+class ConfigureUserIdentity:
+    """Flow step 3b, right after ConfigureDatabaseConnection. Asks who this
+    install is for and derives an immutable Postgres schema slug from the
+    answer (TR-5xx) — one schema per family member, so several installs can
+    share one database cheaply later. Decided here, at wizard time, rather
+    than during voice onboarding: the DB connection has to pick a schema
+    before the server can even check whether onboarding is needed, so
+    onboarding (FR-002) can only refine the separate, freely voice-editable
+    User.name afterward — it has no way to choose a schema.
+
+    No-op once plan.database_schema is already set: immutable after
+    SetupSchema creates it, same posture as SelectTopology's locked topology.
+    A config that predates this feature has no recorded schema and is
+    assumed to already live in "public" (where its data already is) rather
+    than prompted — matching the server's own config-loader fallback."""
+
+    def run(self, plan: InstallationPlan, prompter: WizardPrompter) -> None:
+        if plan.database_schema is not None:
+            return
+        if plan.from_existing_install:
+            plan.database_schema = "public"
+            return
+
+        name = prompter.text(
+            "Who is this install for? (used to personalize replies)", default="user-1"
+        )
+        plan.user_display_name = name or "user-1"
+        derived = schema_slug(plan.user_display_name)
+        schema = prompter.text(
+            "Database schema name for this profile — auto-generated from the name above, "
+            "edit if you prefer (lowercase letters/digits/underscores only; cannot be "
+            "changed later):",
+            default=derived,
+        )
+        plan.database_schema = schema_slug(schema) or derived
 
 
 class CheckPrerequisites:
@@ -656,7 +694,7 @@ class SetupSchema:
 
     def run(self, plan: InstallationPlan, prompter: WizardPrompter) -> None:
         prompter.info("Applying database schema...")
-        self._schema_runner.apply_schema(plan.database_url)
+        self._schema_runner.apply_schema(plan.database_url, plan.database_schema or "public")
 
 
 class RunHealthChecks:

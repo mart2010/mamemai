@@ -277,12 +277,20 @@ class User:
     primary_language: Language | None = None  # None until onboarding is complete
     secondary_languages: list[Language] = field(default_factory=list)
     idle_consolidation_minutes: float = 5.0  # how long to wait after disconnect before running offline consolidation
+    # Personalization (GA may address the user by it) — seeded from the wizard's
+    # alias at first bootstrap, the same string that also became this install's
+    # Postgres schema slug (TR-5xx), but independent of it from then on: this stays
+    # freely editable, the schema never changes.
+    name: str = "user-1"
 
     def update_primary_language(self, new_language: Language) -> None:
         self.primary_language = new_language
 
     def update_idle_consolidation_minutes(self, minutes: float) -> None:
         self.idle_consolidation_minutes = minutes
+
+    def update_name(self, new_name: str) -> None:
+        self.name = new_name
 
 
 @dataclass

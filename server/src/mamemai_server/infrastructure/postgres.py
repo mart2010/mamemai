@@ -6,6 +6,7 @@ then pass it to each repository constructor.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, UTC
 from uuid import UUID
 
@@ -31,13 +32,27 @@ from ..domain.model import (
 )
 from ..services.ports import BundleInstallRecord, MemoryItem
 
+# Duplicated from setup/'s domain.slugify validation (the two packages share no code,
+# TR-001) — this is the point a config-file-supplied string reaches a libpq connection
+# option rather than a bound parameter, so it is checked here regardless of what wrote it.
+_SAFE_SCHEMA = re.compile(r"^[a-z][a-z0-9_]*$")
 
-def connect(dsn: str) -> psycopg.Connection:
+
+def connect(dsn: str, schema: str = "public") -> psycopg.Connection:
     """Autocommit — single-user, single-connection process (see CLAUDE.md); no
     cross-statement transaction boundaries needed for most calls. Callers that need
     atomicity across several writes (e.g. ConsolidateMemory, one conversation at a
-    time) use PSUnitOfWork, which wraps this same connection in `conn.transaction()`."""
-    conn = psycopg.connect(dsn, autocommit=True)
+    time) use PSUnitOfWork, which wraps this same connection in `conn.transaction()`.
+
+    `schema` (INV-3, TR-5xx) scopes every query on this connection to one
+    family member's data via `search_path` — `public` stays behind it so
+    pgvector's `vector` type, installed at its own default location, remains
+    resolvable. Both the live and offline connections (server.py's `main()`)
+    pass the same schema; nothing here ever mixes two schemas on one
+    connection."""
+    if not _SAFE_SCHEMA.match(schema):
+        raise ValueError(f"Unsafe Postgres schema name: {schema!r}")
+    conn = psycopg.connect(dsn, autocommit=True, options=f"-c search_path={schema},public")
     register_vector(conn)
     return conn
 
@@ -206,35 +221,39 @@ class PSUserRepository:
     def get(self) -> User | None:
         with self._conn.cursor() as cur:
             cur.execute(
-                "SELECT id, primary_language, secondary_languages, idle_consolidation_minutes FROM users LIMIT 1"
+                "SELECT id, primary_language, secondary_languages, idle_consolidation_minutes, name "
+                "FROM users LIMIT 1"
             )
             row = cur.fetchone()
             if row is None:
                 return None
-            id_, primary_lang, secondary_langs, idle_consolidation_minutes = row
+            id_, primary_lang, secondary_langs, idle_consolidation_minutes, name = row
             return User(
                 id=id_,
                 primary_language=Language(primary_lang) if primary_lang else None,
                 secondary_languages=[Language(c) for c in (secondary_langs or [])],
                 idle_consolidation_minutes=idle_consolidation_minutes,
+                name=name,
             )
 
     def save(self, user: User) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO users (id, primary_language, secondary_languages, idle_consolidation_minutes)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO users (id, primary_language, secondary_languages, idle_consolidation_minutes, name)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     primary_language = EXCLUDED.primary_language,
                     secondary_languages = EXCLUDED.secondary_languages,
-                    idle_consolidation_minutes = EXCLUDED.idle_consolidation_minutes
+                    idle_consolidation_minutes = EXCLUDED.idle_consolidation_minutes,
+                    name = EXCLUDED.name
                 """,
                 (
                     user.id,
                     user.primary_language.code if user.primary_language else None,
                     [lang.code for lang in user.secondary_languages],
                     user.idle_consolidation_minutes,
+                    user.name,
                 ),
             )
 

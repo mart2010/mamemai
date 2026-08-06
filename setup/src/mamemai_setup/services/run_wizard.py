@@ -18,6 +18,7 @@ def _current_state_lines(plan: InstallationPlan) -> list[str]:
         f"  Whisper model:   {plan.whisper_model or '(not set)'}",
         f"  Compute device:  {plan.compute_device}",
         f"  Database:        {masked_database_url(plan.database_url)}",
+        f"  Profile schema:  {plan.database_schema or '(not recorded — assumed public)'}",
         f"  Topology:        {plan.topology.name.lower() if plan.topology else 'asked again below'}",
     ]
 

@@ -8,8 +8,10 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
 
 ## FR-0xx — Onboarding & first launch
 
-- **FR-001** On first server start, the single `User` row must be created automatically
-  (no manual SQL); `primary_language` starts null.
+- **FR-001** On first server start, the single `User` row (within the deployment's own
+  schema, FR-709/TR-501b) must be created automatically (no manual SQL);
+  `primary_language` starts null, `name` starts at the wizard-seeded value or the
+  literal default `"user-1"` (FR-709).
 - **FR-002** On client connect, when `User.primary_language` is null the server must
   send `select_language` listing the installed language codes (FR-705); the client must
   render a terminal selection prompt and reply `language_selected` with the chosen code.
@@ -25,6 +27,11 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
 - **FR-006** Onboarding is a once-only flow: subsequent sessions with a set primary
   language must skip language selection, and must then include memory brief and session
   tail (both skipped during the onboarding session).
+- **FR-007** Every persona's system prompt must include `User.name` so it may address
+  the user by it naturally — generic (INV-6: not gated on any persona property, unlike
+  the response-language instruction, FR-105), always present since `User.name` always
+  has a value (FR-709). Voice-changeable only via a future directive (not built yet —
+  today `User.name` only ever changes at first bootstrap, FR-709/TR-008).
 
 ## FR-1xx — Live conversation loop
 
@@ -429,8 +436,10 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   installed languages: a directive row outlives the config that produced it, and switching
   to a language with no voice on this machine would produce silence rather than speech. An
   unavailable request is refused in the current language, pointing at the setup wizard.
-- **FR-702** The system must assume exactly one user: no authentication, no concurrent
-  sessions, no row-level security (INV-3).
+- **FR-702** The system must assume exactly one user *within its own schema*: no
+  authentication, no concurrent sessions, no row-level security (INV-3). Several
+  schemas may coexist in one database (FR-709), but a running deployment always
+  targets exactly one.
 - **FR-703** The client must support both deployments from one config file: `ssh_host`
   present → auto-establish (and auto-restart) an SSH tunnel before connecting;
   absent → connect to the local server directly.
@@ -461,3 +470,12 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   (consolidation, memory brief generation, and Ollama-backed persona-strategy helpers
   such as the language tutor's focus interpreter) always runs on a local Ollama model
   regardless, so a GPU-less install accepts it running slower, not remotely.
+- **FR-709** The install wizard must ask who the install is for, defaulting to
+  `"user-1"` when left blank, and derive a Postgres schema slug from the answer
+  (TR-950) — shown back for confirmation/override before it is created, since it
+  cannot be changed afterward (TR-501b). Both the given name (seeding `User.name`,
+  FR-007) and the confirmed schema are written to `mamemai.toml`. On re-run, once a
+  schema is already recorded, the question must not be asked again — a config
+  predating this feature has no recorded schema and is assumed to already live in
+  `"public"` rather than prompted (FR-706's re-run posture, applied to a value that,
+  unlike everything else FR-706 governs, is not editable on re-run at all).

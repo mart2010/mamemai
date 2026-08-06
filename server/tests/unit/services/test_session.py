@@ -1170,6 +1170,31 @@ class TestResponseLanguageInstruction:
         assert "Always respond in the language with IETF code 'es'" in system_prompt
 
 
+class TestUserPersonalization:
+    """Every persona may address the user by User.name — generic, not gated on
+    any persona property (unlike the response-language instruction above)."""
+
+    def test_system_prompt_includes_users_name(self):
+        """Spec: FR-007"""
+        user = User(id=uuid4(), primary_language=Language("en"), name="Alice")
+        use_case, _ = _make_start_session(user=user)
+        ctx = use_case.execute(session_id=uuid4(), started_at=_now())
+
+        system_prompt, _ = _compose_working_context(ctx, recalled_memories=[])
+
+        assert "Alice" in system_prompt
+
+    def test_default_seeded_name_is_used_when_none_was_ever_changed(self):
+        """Spec: FR-007"""
+        user = User(id=uuid4(), primary_language=Language("en"))
+        use_case, _ = _make_start_session(user=user)
+        ctx = use_case.execute(session_id=uuid4(), started_at=_now())
+
+        system_prompt, _ = _compose_working_context(ctx, recalled_memories=[])
+
+        assert "user-1" in system_prompt
+
+
 def _lang_aware_general_assistant() -> AssistantPersona:
     """GA, but declaring it wants [lang:] tags — stands in for a language-sensitive
     persona without dragging the tutor's whole fixture into these tests."""

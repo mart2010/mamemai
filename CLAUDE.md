@@ -73,18 +73,17 @@ cd setup && uv sync && uv run mamemai-setup
 cd server && uv run mamemai-bundle install <bundle-dir>
 ```
 
-Dev environment: **this machine is `linux_workstation_amdgpu`, the GPU workstation itself** — verified
-2026-08-02 (AMD GPU, Postgres 18.4 on 5432, Ollama on 11434, `mamemai` + `mamemai_test`
-databases both present). The `server/` venv is complete (psycopg, pgvector, openai,
-kokoro, faster-whisper all import), so the **full suite runs here**: `uv run pytest`
-for unit *and* integration. `uv run --no-sync` is still the safe habit, and
-`--system-certs` is what fixes the corporate-proxy TLS failure if a sync is needed.
-
-This paragraph previously described "a laptop with a frozen venv" whose integration
-tests could only run elsewhere and whose `test_config.py` couldn't even be collected.
-All three were stale — `--ignore=tests/unit/infrastructure/test_config.py` is
-unnecessary here, and skipping the integration suite on that basis is how two tests
-stayed red from 2026-07-30 to 2026-08-02.
+Dev environment: **this machine is `linux_workstation_amdgpu`, the GPU workstation itself**
+(AMD GPU, Postgres 18.4 on 5432, Ollama on 11434). `mamemai`/`mamemai_test` databases and
+the `mamemai` role (peer auth, no password — `pg_ident.conf`/`pg_hba.conf` mapping this
+OS user to it) exist on this machine as of 2026-08-06, mirroring the older `memai`/
+`memai_test` databases' setup exactly (both still present, untouched, not this project's
+to drop). The `server/` venv is complete (psycopg, pgvector, openai, kokoro,
+faster-whisper all import), so the **full suite runs here**: `uv run pytest` for unit
+*and* integration (`MAMEMAI_TEST_DATABASE_URL=postgresql:///mamemai_test?user=mamemai`
+if the default password-based DSN in `conftest.py` doesn't match this peer-auth setup).
+`uv run --no-sync` is still the safe habit, and `--system-certs` is what fixes the
+corporate-proxy TLS failure if a sync is needed.
 
 ## Linting
 

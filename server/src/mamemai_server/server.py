@@ -566,11 +566,16 @@ async def _handle(ws, ctx: ServerContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_user_exists(user_repo: PSUserRepository) -> None:
-    """Single-user system with no auth — bootstrap the one User row on first run
-    instead of requiring a manual SQL insert before first connect."""
+def _ensure_user_exists(user_repo: PSUserRepository, name_seed: str) -> None:
+    """Single-user-per-schema system with no auth (INV-3) — bootstrap the one
+    User row on first run instead of requiring a manual SQL insert before
+    first connect. `name_seed` comes from the wizard's `[user] name` (the
+    alias that also became this schema's slug); only read here, at the row's
+    creation — the DB row is authoritative afterward, so re-running the
+    wizard with a different answer has no effect on an already-bootstrapped
+    install."""
     if user_repo.get() is None:
-        user_repo.save(User(id=uuid4()))
+        user_repo.save(User(id=uuid4(), name=name_seed))
 
 
 def main() -> None:
@@ -601,12 +606,13 @@ def main() -> None:
             )
 
     print("Connecting to database…")
-    conn = postgres.connect(cfg.database_url)
+    conn = postgres.connect(cfg.database_url, cfg.database_schema)
     user_repo = PSUserRepository(conn)
-    _ensure_user_exists(user_repo)
+    _ensure_user_exists(user_repo, cfg.user_name_seed or "user-1")
     # Separate connection for the background offline pipeline — see ServerContext's
-    # offline_* fields docstring for why this can't share `conn`.
-    offline_conn = postgres.connect(cfg.database_url)
+    # offline_* fields docstring for why this can't share `conn`. Same schema as the
+    # live connection above (TR-5xx) — one deployment always targets exactly one.
+    offline_conn = postgres.connect(cfg.database_url, cfg.database_schema)
 
     print("Loading Whisper model…")
     stt = FasterWhisperSTTService(

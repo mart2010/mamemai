@@ -80,7 +80,7 @@ class ConfigWriter(Protocol):
 
 
 class SchemaRunner(Protocol):
-    def apply_schema(self, database_url: str) -> None: ...  # idempotent, no migration framework
+    def apply_schema(self, database_url: str, schema: str) -> None: ...  # idempotent, no migration framework
 
 
 @dataclass(frozen=True)
