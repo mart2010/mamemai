@@ -1,0 +1,63 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# C extensions
+*.so
+
+# Distribution, packaging, virtual env
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+/
+# virt env
+.venv
+
+# Installer logs and all logs
+pip-log.txt
+pip-delete-this-directory.txt
+*.log
+
+# Unit test / coverage reports
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+
+
+# safety nets since the real config live in %LOCALAPPDATA%\mamemai (or ~/.config/mamemai on Linux)
+server/config/
+client/config/
+
+.env
+.env.local
+
+# Raw session logs (server/logs/sessions/*.jsonl) — full conversation transcripts,
+# kept forever per CLAUDE.md, must never be committed.
+server/logs/
+*.jsonl
+
+# my exclusion
+xprivate/
+
+# Claude Code local files — machine-specific (host names, local paths). Never commit.
+.claude/settings.local.json
+.claude/machine-aliases.local.json

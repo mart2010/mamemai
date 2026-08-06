@@ -1,0 +1,59 @@
+[project]
+name = "mamemai-server"
+version = "0.1.0"
+description = "Mamémai voice assistant — server (GPU-equipped machine)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "faster-whisper>=1.2.1",
+    # ctranslate2 (faster-whisper's backend) needs libcublas.so.12 at runtime but declares
+    # no CUDA dependency of its own (expects the system to provide it). sentence-transformers'
+    # torch pulls in the newer, differently-named "nvidia-cublas" (CUDA 13) package instead,
+    # which doesn't satisfy this — so without this explicit pin, nothing in the resolved
+    # tree ships libcublas.so.12 at all. See CLAUDE.md / docs/PLAN.md Phase 4 Pass 2 findings.
+    "nvidia-cublas-cu12",
+    "ollama>=0.6.1",
+    "platformdirs>=4.0",
+    "tomli-w>=1.2",
+    "soundfile>=0.13.1",
+    "kokoro>=0.9.0",
+    "scipy>=1.13",
+    "webrtcvad-wheels>=2.0.14",
+    "psycopg[binary]>=3.1",
+    "pgvector>=0.3",
+    "sentence-transformers>=3.0",
+    "websockets>=16.0",
+    "openai>=1.30",
+    "num2words>=0.5.13",
+    "en-core-web-sm",
+    "truststore>=0.9",
+    "py3langid>=0.2.2",
+]
+
+[project.scripts]
+mamemai-server = "mamemai_server.server:main"
+mamemai-bundle = "mamemai_server.bundle_cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["uv_build>=0.11.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }

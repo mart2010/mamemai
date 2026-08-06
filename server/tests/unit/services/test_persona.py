@@ -1,0 +1,255 @@
+import pytest
+from datetime import datetime, UTC
+from uuid import uuid4
+
+from mamemai_server.domain.model import AssistantPersona, GENERAL_ASSISTANT_ID, Language, User
+from mamemai_server.services.directives import PersonaDirectiveSync
+from mamemai_server.services.persona import (
+    CreatePersona,
+    DeactivatePersona,
+    EditPersona,
+    ListPersonas,
+    ReactivatePersona,
+    RemovePersona,
+    SwitchPersona,
+)
+from mamemai_server.services.session import WorkingMemory
+
+from tests.fakes.fakes import FakeDirectiveRepository, FakePersonaRepository
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _directive_sync(directive_repo: FakeDirectiveRepository | None = None) -> PersonaDirectiveSync:
+    return PersonaDirectiveSync(directive_repo or FakeDirectiveRepository())
+
+
+def _general_assistant() -> AssistantPersona:
+    return AssistantPersona.general_assistant("You are a helpful assistant.")
+
+
+def _other_persona(name: str = "Coach") -> AssistantPersona:
+    return AssistantPersona(
+        id=uuid4(),
+        name=name,
+        system_prompt="You are a coach.",
+        languages=[],
+        response_language=Language("en"),
+        voices={"default": "af_heart"},
+        is_system=False,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+def _session(active_persona: AssistantPersona) -> WorkingMemory:
+    return WorkingMemory(
+        session_id=uuid4(),
+        started_at=_now(),
+        user=User(id=uuid4(), primary_language=Language("en")),
+        active_persona=active_persona,
+        directives=[],
+        memory_brief=None,
+    )
+
+
+def _repo_with(*personas: AssistantPersona) -> FakePersonaRepository:
+    repo = FakePersonaRepository()
+    for p in personas:
+        repo.save(p)
+    return repo
+
+
+class TestCreatePersona:
+    def test_creates_persona_when_general_assistant_active(self):
+        """Spec: FR-204"""
+        ga = _general_assistant()
+        session = _session(ga)
+        use_case = CreatePersona(_repo_with(ga), _directive_sync())
+        persona = use_case.execute(session, name="Coach", system_prompt="You coach.", now=_now())
+        assert persona.name == "Coach"
+        assert not persona.is_system
+
+    def test_raises_when_non_general_persona_active(self):
+        """Spec: FR-204"""
+        coach = _other_persona()
+        session = _session(coach)
+        use_case = CreatePersona(_repo_with(coach), _directive_sync())
+        with pytest.raises(ValueError, match="GeneralAssistant"):
+            use_case.execute(session, name="Tutor", system_prompt="You teach.", now=_now())
+
+    def test_saved_to_repo(self):
+        """Spec: FR-204"""
+        ga = _general_assistant()
+        session = _session(ga)
+        repo = _repo_with(ga)
+        use_case = CreatePersona(repo, _directive_sync())
+        persona = use_case.execute(session, name="Coach", system_prompt="You coach.", now=_now())
+        assert repo.get(persona.id) is not None
+
+    def test_creates_switch_directive_for_new_persona(self):
+        """Spec: FR-207 — a Directive is how the user reaches this persona going
+        forward, created in the same use case that creates the persona itself."""
+        ga = _general_assistant()
+        session = _session(ga)
+        directive_repo = FakeDirectiveRepository()
+        use_case = CreatePersona(_repo_with(ga), _directive_sync(directive_repo))
+        persona = use_case.execute(session, name="Coach", system_prompt="You coach.", now=_now())
+        directives = directive_repo.list_all()
+        assert directives
+        assert all(d.target_persona_id == persona.id for d in directives)
+
+
+class TestListPersonas:
+    def test_returns_all_personas(self):
+        """Spec: FR-204"""
+        ga = _general_assistant()
+        coach = _other_persona("Coach")
+        use_case = ListPersonas(_repo_with(ga, coach))
+        result = use_case.execute()
+        assert len(result) == 2
+
+    def test_empty_repo(self):
+        """Spec: FR-204"""
+        use_case = ListPersonas(FakePersonaRepository())
+        assert use_case.execute() == []
+
+
+class TestEditPersona:
+    def test_updates_name_and_prompt(self):
+        """Spec: FR-204"""
+        coach = _other_persona("Coach")
+        repo = _repo_with(coach)
+        use_case = EditPersona(repo)
+        updated = use_case.execute(coach.id, now=_now(), name="Mentor", system_prompt="You mentor.")
+        assert updated.name == "Mentor"
+        assert updated.system_prompt == "You mentor."
+
+    def test_partial_update_preserves_other_fields(self):
+        """Spec: FR-204"""
+        coach = _other_persona("Coach")
+        original_prompt = coach.system_prompt
+        repo = _repo_with(coach)
+        use_case = EditPersona(repo)
+        updated = use_case.execute(coach.id, now=_now(), name="Mentor")
+        assert updated.system_prompt == original_prompt
+
+    def test_raises_on_unknown_persona(self):
+        """Spec: FR-204"""
+        use_case = EditPersona(FakePersonaRepository())
+        with pytest.raises(ValueError):
+            use_case.execute(uuid4(), now=_now(), name="X")
+
+    def test_updates_voices_speaking_rate_response_language(self):
+        """Spec: FR-204, FR-105"""
+        coach = _other_persona("Coach")
+        repo = _repo_with(coach)
+        use_case = EditPersona(repo)
+        updated = use_case.execute(
+            coach.id, now=_now(), voices={"default": "ff_siwis"}, speaking_rate=0.9, response_language=Language("fr"),
+        )
+        assert updated.default_voice == "ff_siwis"
+        assert updated.speaking_rate == 0.9
+        assert updated.response_language == Language("fr")
+
+    def test_updates_system_persona(self):
+        """Spec: FR-204, FR-003"""
+        ga = _general_assistant()
+        repo = _repo_with(ga)
+        use_case = EditPersona(repo)
+        updated = use_case.execute(ga.id, now=_now(), name="Renamed")
+        assert updated.name == "Renamed"
+
+
+class TestDeactivatePersona:
+    def test_deactivates_non_system_persona(self):
+        """Spec: FR-204"""
+        coach = _other_persona("Coach")
+        repo = _repo_with(coach)
+        event = DeactivatePersona(repo).execute(coach.id, now=_now())
+        assert repo.get(coach.id).is_active is False
+        assert event.persona_id == coach.id
+
+    def test_raises_on_system_persona(self):
+        """Spec: FR-201, FR-204"""
+        ga = _general_assistant()
+        repo = _repo_with(ga)
+        with pytest.raises(ValueError, match="[Ss]ystem"):
+            DeactivatePersona(repo).execute(ga.id, now=_now())
+
+    def test_raises_on_unknown_persona(self):
+        """Spec: FR-204"""
+        with pytest.raises(ValueError):
+            DeactivatePersona(FakePersonaRepository()).execute(uuid4(), now=_now())
+
+
+class TestReactivatePersona:
+    def test_reactivates_deactivated_persona(self):
+        """Spec: FR-204"""
+        coach = _other_persona("Coach")
+        repo = _repo_with(coach)
+        DeactivatePersona(repo).execute(coach.id, now=_now())
+        event = ReactivatePersona(repo).execute(coach.id, now=_now())
+        assert repo.get(coach.id).is_active is True
+        assert event.persona_id == coach.id
+
+    def test_raises_on_unknown_persona(self):
+        """Spec: FR-204"""
+        with pytest.raises(ValueError):
+            ReactivatePersona(FakePersonaRepository()).execute(uuid4(), now=_now())
+
+
+class TestRemovePersona:
+    def test_removes_non_system_persona(self):
+        """Spec: FR-204"""
+        coach = _other_persona("Coach")
+        repo = _repo_with(coach)
+        RemovePersona(repo).execute(coach.id)
+        assert repo.get(coach.id) is None
+
+    def test_raises_on_system_persona(self):
+        """Spec: FR-201, FR-204"""
+        ga = _general_assistant()
+        repo = _repo_with(ga)
+        with pytest.raises(ValueError, match="[Ss]ystem"):
+            RemovePersona(repo).execute(ga.id)
+
+    def test_raises_on_unknown_persona(self):
+        """Spec: FR-204"""
+        with pytest.raises(ValueError):
+            RemovePersona(FakePersonaRepository()).execute(uuid4())
+
+    # Its GA-owned-style "switch to me" directive no longer needs explicit cleanup
+    # here (unlike the retired Concept-backed scheme): `directives.target_persona_id`
+    # is a real FK with ON DELETE CASCADE (INV-9) — covered by the real-Postgres
+    # cascade integration test, same posture as concepts/procedures cascade, which
+    # also has no unit-level (fake-repo) equivalent.
+
+
+class TestSwitchPersona:
+    def test_returns_event_with_correct_ids(self):
+        """Spec: FR-207"""
+        ga = _general_assistant()
+        coach = _other_persona("Coach")
+        session = _session(ga)
+        repo = _repo_with(ga, coach)
+        event = SwitchPersona(repo).execute(session, coach.id)
+        assert event.from_persona_id == GENERAL_ASSISTANT_ID
+        assert event.to_persona_id == coach.id
+
+    def test_updates_session_active_persona(self):
+        """Spec: FR-207"""
+        ga = _general_assistant()
+        coach = _other_persona("Coach")
+        session = _session(ga)
+        SwitchPersona(_repo_with(ga, coach)).execute(session, coach.id)
+        assert session.active_persona.id == coach.id
+
+    def test_raises_on_unknown_persona(self):
+        """Spec: FR-207"""
+        ga = _general_assistant()
+        session = _session(ga)
+        with pytest.raises(ValueError):
+            SwitchPersona(FakePersonaRepository()).execute(session, uuid4())

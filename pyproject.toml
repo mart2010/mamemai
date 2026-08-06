@@ -1,0 +1,16 @@
+# Monorepo, so here goes all general options!
+[project]
+name = "mamemai"
+version = "0.1.0"
+description = "Mamémai, my personal assistant"
+authors = [
+    { name = "mart2010", email = "mart2010.l@gmail.com" }
+]
+
+[tool.ruff]
+# Set the maximum line length to 79. (PEP8 recommands 80)
+line-length = 120
+
+# In addition to the standard set of exclusions, omit all tests
+extend-exclude = ["tests", "test"]
+
