@@ -17,24 +17,24 @@
 # multiple vendors, all non-reasoning except the qwen3:14b cautionary entry.
 
 [[models]]
-model_id = "aya-expanse"
-display_name = "Aya Expanse (8B)"
-min_vram_gb = 5.0
-recommended_vram_gb = 8.0
-languages = ["en", "fr", "es", "de", "it", "pt", "ja", "ko", "zh", "ar", "hi", "ru"]
-recommended = true
-reasoning = false
-description = "Multilingual, no reasoning overhead. Current default — fast and reliable for voice conversation, proven on the GPU server."
-
-[[models]]
 model_id = "llama3.1:8b"
 display_name = "Llama 3.1 (8B)"
 min_vram_gb = 5.0
 recommended_vram_gb = 8.0
 languages = ["en", "de", "fr", "it", "pt", "hi", "es", "th"]
+recommended = true
+reasoning = false
+description = "Default as of live testing 2026-07-18/2026-08-06: response_language occasionally wobbles into another language but self-corrects on the very next turn without prompting. Narrower official language list than Aya Expanse (8 vs. 12), but the one that actually recovers from drift."
+
+[[models]]
+model_id = "aya-expanse"
+display_name = "Aya Expanse (8B)"
+min_vram_gb = 5.0
+recommended_vram_gb = 8.0
+languages = ["en", "fr", "es", "de", "it", "pt", "ja", "ko", "zh", "ar", "hi", "ru"]
 recommended = false
 reasoning = false
-description = "Meta's ecosystem alternative to Aya Expanse at the same VRAM tier. Officially supports 8 languages (narrower than Aya Expanse's 12)."
+description = "Multilingual, no reasoning overhead, broader official language list than Llama 3.1. Demoted from default 2026-08-06: once response_language drifts it never recovers for the rest of the session, even after repeated correction (live-tested 2026-07-13/2026-07-18) — see llama3.1:8b for the model that doesn't have this failure mode."
 
 [[models]]
 model_id = "command-r7b"

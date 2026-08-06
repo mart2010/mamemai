@@ -70,7 +70,7 @@ def test_download_failure_warns_but_does_not_raise():
 
     assert plan.tts_engine_by_language == {"en": "piper"}
     assert installer.downloaded_piper_voices == []
-    assert any("Could not download" in m for m in prompter.info_messages)
+    assert any("Couldn't download" in m for m in prompter.info_messages)
 
 
 def test_no_covering_engine_skips_with_info_message():

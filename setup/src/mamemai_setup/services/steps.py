@@ -81,8 +81,7 @@ class ShowWelcome:
             [
                 "Mamémai can be installed two ways — you'll choose one in the next step:",
                 "  - Single-host: client and server run on this same machine.",
-                "  - Split-host: the server runs on a separate GPU machine; this client",
-                "    connects to it over an SSH tunnel.",
+                "  - Split-host: the server runs on a separate GPU machine; this client connects to it over an SSH tunnel.",
                 "",
                 "Before continuing, make sure you have:",
                 *[f"  - {item}" for item in self._PREREQUISITES],
@@ -584,8 +583,10 @@ class ResolveSTTEngine:
             # first use (see model_installer.py), so a failure here just means the
             # first server startup will be slower, not that the install is broken.
             prompter.info(
-                f"Could not pre-download the '{plan.whisper_model}' Whisper model ({exc}). "
-                "It will be downloaded automatically the first time the server starts instead."
+                f"Couldn't pre-download the '{plan.whisper_model}' Whisper model — usually just a "
+                f"network hiccup or a proxy/firewall blocking Hugging Face ({exc}). Not a problem: "
+                "it downloads automatically the first time the server starts instead, or re-run "
+                "mamemai-setup later to retry."
             )
 
 
@@ -630,8 +631,10 @@ class ResolveTTSEngines:
                         # Non-fatal, matching ModelInstaller's re-runnable/idempotent contract
                         # (CLAUDE.md) — re-running mamemai-setup will retry this download.
                         prompter.info(
-                            f"Could not download the '{voice.voice_id}' voice for "
-                            f"{format_language(language)} ({exc}). Re-run mamemai-setup later to retry."
+                            f"Couldn't download the '{voice.voice_id}' voice for "
+                            f"{format_language(language)} — usually just a network hiccup or a "
+                            f"proxy/firewall blocking Hugging Face ({exc}). Re-run mamemai-setup later "
+                            "to retry."
                         )
                 else:
                     prompter.info(
@@ -660,9 +663,9 @@ class DownloadEmbeddingModel:
             self._installer.download_embedding_model()
         except Exception as exc:  # noqa: BLE001 — network calls can fail in many ways
             prompter.info(
-                f"Could not pre-download the embedding model ({exc}). The server will fail "
-                "to start until it's downloaded — re-run mamemai-setup later to retry, or "
-                "download it manually before starting the server."
+                f"Couldn't pre-download the embedding model — usually just a network hiccup or a "
+                f"proxy/firewall blocking Hugging Face ({exc}). The server needs this one before it "
+                "can start, so re-run mamemai-setup later to retry, or download it manually first."
             )
 
 

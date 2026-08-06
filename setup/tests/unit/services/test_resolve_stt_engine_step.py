@@ -84,7 +84,7 @@ def test_download_failure_warns_but_does_not_raise():
 
     assert plan.whisper_model == "small"
     assert installer.downloaded_whisper_models == []
-    assert any("Could not pre-download" in m for m in prompter.info_messages)
+    assert any("Couldn't pre-download" in m for m in prompter.info_messages)
 
 
 def test_no_available_engine_skips_with_info_message():

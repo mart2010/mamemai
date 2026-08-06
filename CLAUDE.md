@@ -104,10 +104,12 @@ Ruff at the monorepo root, `line-length = 120`, tests excluded. Not in any venv 
 
 ## LLM model guidance (operational)
 
-Wizard default is `aya-expanse` (~8B multilingual), but it has a known bug: once its
-`response_language` drifts, it never recovers for the rest of the session.
-`llama3.1:8b` wobbles occasionally but self-corrects, and is this machine's actual
-configured model as of 2026-07-18 (`mamemai.toml [llm] model`) — check that file rather
-than assuming aya-expanse is what's actually running. Avoid ~70B-class models (VRAM
-eviction, cold-reload stalls) and reasoning models (`<think>` blocks get spoken
-aloud) — rationale in spec TR-952.
+Wizard default is `llama3.1:8b` (~8B, as of 2026-08-06) — occasionally wobbles
+`response_language` but self-corrects on the next turn without prompting. `aya-expanse`
+is still catalogued but demoted: once its `response_language` drifts it never recovers
+for the rest of the session, confirmed across repeated live tests. Either can be
+overridden at install/re-run time, so check `mamemai.toml [llm] model` for what a given
+machine is actually running rather than assuming the wizard default — this session
+picked `mistral-nemo` instead for its first live run, still being monitored. Avoid
+~70B-class models (VRAM eviction, cold-reload stalls) and reasoning models (`<think>`
+blocks get spoken aloud) — rationale in spec TR-952.

@@ -1,9 +1,15 @@
 # Copyright (c) 2026 Mamemai. Licensed under AGPL-3.0.
 from __future__ import annotations
 
+import re
+import textwrap
+
 import questionary
 
 from ..services.ports import PromptChoice
+
+_HEADING_WIDTH = 78
+_BULLET = re.compile(r"^(\s*)(- )?(.*)$")
 
 
 class QuestionaryPrompter:
@@ -29,11 +35,30 @@ class QuestionaryPrompter:
         print(message)
 
     def heading(self, title: str, lines: list[str] | None = None) -> None:
-        border = "=" * max(60, len(title) + 4)
+        """The border and every wrapped line share one width so the banner reads as
+        one consistent block regardless of terminal width — long unwrapped lines used
+        to get wrapped by the terminal itself, with no indent on the continuation, so
+        bullets and their overflow drifted out of alignment. `replace_whitespace=False`
+        matters for lines like run_wizard.py's `_current_state_lines`, which pad with
+        extra internal spaces to line up a "key: value" column; they're short enough to
+        never actually wrap, but textwrap would otherwise collapse that padding."""
+        width = max(_HEADING_WIDTH, len(title) + 4)
+        border = "=" * width
         print(f"\n{border}")
         print(f"  {title}")
         if lines:
             print()
             for line in lines:
-                print(f"  {line}" if line else "")
+                if not line:
+                    print()
+                    continue
+                match = _BULLET.match(line)
+                assert match is not None  # `(\s*)(- )?(.*)` with every group optional always matches
+                leading, marker, text = match.groups()
+                indent = f"  {leading}{marker or ''}"
+                cont_indent = " " * len(indent)
+                wrapped = textwrap.wrap(text, width=width - len(indent), replace_whitespace=False) or [""]
+                print(f"{indent}{wrapped[0]}")
+                for cont in wrapped[1:]:
+                    print(f"{cont_indent}{cont}")
         print(f"{border}\n")
