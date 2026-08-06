@@ -1,17 +1,27 @@
 # Copyright (c) 2026 Mamemai. Licensed under AGPL-3.0.
-"""Spec: TR-961, FR-307, INV-10 — the two filters that stop episode fabrication.
+"""Spec: TR-961, FR-307, INV-10 — the three filters that stop episode fabrication.
 
-Both replace a plea in the extraction prompt with something the prompt cannot enforce:
+Each replaces a plea in the extraction prompt with something the prompt cannot enforce:
 
-  user_turns_only          the fabricated summaries are summaries of *assistant* content,
-                           so on a user-only transcript they are unconstructible rather
-                           than discouraged.
-  drop_chat_dated_episodes the prompt already demands a time "distinct from during this
-                           chat"; a model that files the conversation as a life event
-                           dates it with the conversation's own timestamp.
+  user_turns_only                 the fabricated summaries are summaries of *assistant*
+                                  content, so on a user-only transcript they are
+                                  unconstructible rather than discouraged.
+  drop_chat_dated_episodes        the prompt already demands a time "distinct from
+                                  during this chat"; a model that files the conversation
+                                  as a life event dates it with the conversation's own
+                                  timestamp.
+  drop_ungrounded_episode_entries the prompt now asks for a verbatim "evidence" quote;
+                                  an invented episode's quote is either missing or itself
+                                  invented, and an invented quote does not literally
+                                  occur in the transcript it claims to come from.
 
 Measured on the real database: 8 of 9 stored episodes fall inside their own conversation's
 span, and the ninth misses by 0.02s only because its timestamp was truncated to seconds.
+`drop_ungrounded_episode_entries` was added after a live miss neither of the first two
+caught (2026-08-06): a session where the user asked nothing but general astronomy
+questions produced a stored episode claiming they had personally seen the northern
+lights — invented purely from the topic word "aurores boréales" in their own turns, with
+no assistant content involved and no in-chat timestamp to flag it.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -21,6 +31,7 @@ from mamemai_server.domain.model import Conversation, Episode, Speaker, Turn
 from mamemai_server.infrastructure.llm._common import (
     _extraction_system_prompt,
     drop_chat_dated_episodes,
+    drop_ungrounded_episode_entries,
     user_turns_only,
 )
 
@@ -123,6 +134,83 @@ class TestDropChatDatedEpisodes:
 
         assert during == []
         assert len(before) == 1
+
+
+class TestDropUngroundedEpisodeEntries:
+    # A real transcript shape: the user asking general questions, never claiming a
+    # personal event — the exact conversation shape that produced the live miss.
+    TRANSCRIPT = (
+        "User: Alors, j'aimerais qu'on discute de l'astronomie aujourd'hui. Est-ce que "
+        "tu connais bien l'astronomie ?\n"
+        "User: qu'est-ce que tu connais des aurores boréales et des halos ?"
+    )
+
+    def test_an_entry_with_no_evidence_is_dropped(self):
+        entries = [{"summary": "something", "happened_at": "2026-08-05T00:00:00"}]
+
+        kept = drop_ungrounded_episode_entries(entries, self.TRANSCRIPT)
+
+        assert kept == []
+
+    def test_a_fabricated_quote_is_dropped(self):
+        """The real miss that motivated this filter: the topic word "aurores boréales"
+        in the user's own turns was enough for the model to invent a first-person claim
+        never made. The fabricated "evidence" naturally doesn't occur in the transcript
+        either, since neither is real."""
+        entries = [{
+            "summary": "L'utilisateur a vu des aurores boréales dans le Nord de la France",
+            "happened_at": "2026-08-05T00:00:00",
+            "evidence": "j'ai vu des aurores boréales dans le Nord de la France",
+        }]
+
+        kept = drop_ungrounded_episode_entries(entries, self.TRANSCRIPT)
+
+        assert kept == []
+
+    def test_a_genuine_verbatim_quote_survives(self):
+        entries = [{
+            "summary": "L'utilisateur s'intéresse à l'astronomie",
+            "happened_at": None,
+            "evidence": "j'aimerais qu'on discute de l'astronomie aujourd'hui",
+        }]
+
+        kept = drop_ungrounded_episode_entries(entries, self.TRANSCRIPT)
+
+        assert kept == entries
+
+    def test_grounding_ignores_case_accents_and_punctuation(self):
+        """STT casing/accent/punctuation noise between the quote and its source must not
+        sink a genuine quote — only word content and order matter."""
+        entries = [{
+            "summary": "...",
+            "happened_at": None,
+            "evidence": "J'AIMERAIS QU'ON DISCUTE DE L'ASTRONOMIE AUJOURD'HUI",
+        }]
+
+        kept = drop_ungrounded_episode_entries(entries, self.TRANSCRIPT)
+
+        assert kept == entries
+
+    def test_a_reordered_quote_is_not_grounded(self):
+        """Grounding requires an actual contiguous quote, not just the same words
+        present somewhere in the transcript — word-salad from real vocabulary is exactly
+        what an invented-but-plausible episode would produce."""
+        entries = [{
+            "summary": "...",
+            "happened_at": None,
+            "evidence": "aujourd'hui l'astronomie discute on qu'",
+        }]
+
+        kept = drop_ungrounded_episode_entries(entries, self.TRANSCRIPT)
+
+        assert kept == []
+
+    def test_a_non_string_evidence_is_dropped(self):
+        entries = [{"summary": "something", "happened_at": None, "evidence": 42}]
+
+        kept = drop_ungrounded_episode_entries(entries, self.TRANSCRIPT)
+
+        assert kept == []
 
 
 class TestPromptSections:

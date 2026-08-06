@@ -976,3 +976,16 @@ only validation layer.
   and is caught only by the date filter.
   An episode with a null `happened_at` is kept — undated is not evidence of being about
   the chat, and dropping it would be a different policy from the one stated here.
+  Third, independent filter, added after a live miss neither of the above caught
+  (2026-08-06): a session where the user asked nothing but general astronomy questions —
+  no assistant fabrication involved, no in-chat timestamp — still produced a stored
+  episode claiming the user had personally seen the northern lights, invented purely
+  from the topic word "aurores boréales" appearing in their own turns. The extraction
+  prompt now asks for an `"evidence"` field per episode: a verbatim quote from the
+  user's own turns proving they said it. **`drop_ungrounded_episode_entries` discards
+  any episode entry whose `evidence` does not literally occur (case/accent/punctuation-
+  insensitive) in the transcript that produced it** — checked against the same window
+  text the model was actually shown, before the entry is parsed into a domain `Episode`.
+  Same posture as the other two: not a prompt asking the model not to invent, a
+  post-hoc check an invented answer cannot pass, since copying a real quote is trivial
+  and inventing one that also happens to appear verbatim in the source is not.

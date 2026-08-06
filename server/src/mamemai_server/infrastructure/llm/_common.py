@@ -1,5 +1,6 @@
 # Copyright (c) 2026 Mamemai. Licensed under AGPL-3.0.
 import re
+import unicodedata
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -208,6 +209,62 @@ def drop_chat_dated_episodes(episodes: list[Episode], conversation: Conversation
     return kept
 
 
+_GROUNDING_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
+
+def _normalize_for_grounding(text: str) -> str:
+    """Casefold, strip accents/punctuation, collapse whitespace. Enough slack to match a
+    verbatim quote against its source past minor STT/formatting noise, without being loose
+    enough to accept a paraphrase instead of an actual quote."""
+    text = unicodedata.normalize("NFKD", text.casefold())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = _GROUNDING_PUNCT_RE.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _is_grounded(evidence: str | None, transcript: str) -> bool:
+    """Does the claimed verbatim quote `evidence` actually occur in `transcript`?"""
+    if not evidence:
+        return False
+    normalized_evidence = _normalize_for_grounding(evidence)
+    if not normalized_evidence:
+        return False
+    return normalized_evidence in _normalize_for_grounding(transcript)
+
+
+def drop_ungrounded_episode_entries(entries: list[dict], transcript: str) -> list[dict]:
+    """Drop episode entries whose claimed "evidence" quote does not actually occur in the
+    transcript that produced them (TR-961, third filter).
+
+    `user_turns_only` stops episodes fabricated by generalising from the *assistant's*
+    turns, and `drop_chat_dated_episodes` stops the conversation itself being filed as a
+    life event — but measured live 2026-08-06: a session where the user asked nothing but
+    general astronomy questions (no assistant fabrication involved, no in-chat timestamp
+    for the other filter to catch) still produced a stored episode reading, in French,
+    "the user saw the northern lights in northern France" — invented purely from the topic
+    word "aurores boréales" appearing in the user's own turns, with nothing in those turns
+    actually claiming it happened to them.
+
+    The extraction prompt now asks for an "evidence" field alongside each episode: a
+    verbatim quote from the user's own words that states it. A hallucinated episode's
+    supporting quote is either missing or itself invented, and an invented quote does not
+    literally occur in the transcript it claims to come from — while a genuine one
+    trivially does, since copying a snippet of text already in front of the model is not a
+    hard task. Same withhold-the-signal posture as the other two filters: this does not
+    ask the model to not invent, it makes an invented answer unable to pass.
+    """
+    kept = []
+    for entry in entries:
+        evidence = entry.get("evidence")
+        if not _is_grounded(evidence if isinstance(evidence, str) else None, transcript):
+            summary_preview = entry.get("summary")
+            print(f"[extraction] dropped ungrounded episode (no matching quote in the "
+                  f"user's own words): {str(summary_preview)[:60]!r}")
+            continue
+        kept.append(entry)
+    return kept
+
+
 def merge_extractions(results: list[ExtractionResult]) -> ExtractionResult:
     """Fold per-window results into one, first occurrence winning.
 
@@ -375,7 +432,9 @@ def _extraction_system_prompt(
         '(e.g. "yesterday", "last weekend", "at work", "in Paris") distinct from '
         "\"during this chat\" — if you can't name when or where it happened, don't "
         'extract it (each: {"summary": str, "happened_at": ISO8601 datetime of when it '
-        'happened, or null only if genuinely unknown}).'
+        'happened, or null only if genuinely unknown, "evidence": a short quote copied '
+        "word-for-word from the user's own turns above proving they said this — if you "
+        'cannot quote their own words stating it, do not include the episode}).'
         f"{episode_language_rule}\n"
         if extract_episodes
         else ""
@@ -434,11 +493,21 @@ def _entries(data: dict, key: str) -> list[dict]:
     return [entry for entry in entries if isinstance(entry, dict)]
 
 
-def _parse_extraction(data: dict, conversation: Conversation, persona_id: UUID, lang: Language) -> ExtractionResult:
+def _parse_extraction(
+    data: dict, conversation: Conversation, persona_id: UUID, lang: Language,
+    episode_transcript: str | None = None,
+) -> ExtractionResult:
+    """`episode_transcript` is the transcript the model actually saw for this call — when
+    given, each episode entry's "evidence" quote is required to actually occur in it
+    (`drop_ungrounded_episode_entries`, TR-961's third filter) before being kept."""
     origin_id = conversation.id or 0
 
+    episode_entries = _entries(data, "episodes")
+    if episode_transcript is not None:
+        episode_entries = drop_ungrounded_episode_entries(episode_entries, episode_transcript)
+
     episodes = []
-    for e in _entries(data, "episodes"):
+    for e in episode_entries:
         summary = _text(e, "summary")
         if summary is None:
             continue

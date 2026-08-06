@@ -236,6 +236,6 @@ class OpenRouterConsolidationExtractor:
                 data = json.loads(response.choices[0].message.content or "")
             except (json.JSONDecodeError, AttributeError):
                 continue
-            results.append(_parse_extraction(data, conversation, persona_id, lang))
+            results.append(_parse_extraction(data, conversation, persona_id, lang, episode_transcript=transcript))
 
         return merge_extractions(results)
