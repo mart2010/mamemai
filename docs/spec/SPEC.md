@@ -59,6 +59,14 @@ Rules:
 4. A requirement marked **⚠ Gap** describes intended behaviour whose wiring is
    incomplete in code; the gap text says exactly what is missing. Gaps are tracked
    honestly rather than specced as if done.
+5. **Requirements stay present-tense; trimmed narrative moves to the archive, not the
+   void.** A requirement's prose accumulates dated narrative over time — a
+   measurement that justified a threshold, an incident write-up that motivated a
+   rule, a "was X until date Y" comparison. When it's edited (spec-changing commit,
+   or a periodic drift review below), trim it back down to what's true now and move
+   what you cut into `docs/archive/spec/` rather than deleting it — see
+   `docs/archive/spec/README.md`. The live spec should always read like it was
+   written yesterday, never like a change log.
 
 ## Conformance: how tests cite the spec
 
@@ -79,14 +87,12 @@ Rules:
   module (too coarse to stay true).
 - New tests cite from day one.
 
-**Conformance status (2026-07-12, back-fill complete):** the entire server suite
-(283 citations across 25 test files) cites the spec; 99 of 155 requirements have at
-least one citing test. The uncited remainder clusters where no test surface exists
-yet: the client (`TR-2xx` — no client test suite), the WebSocket handler / onboarding
-flow (`FR-0xx`, `TR-1xx` — needs E2E), composition-root wiring (`TR-0xx`), and
-process-level invariants enforced by review rather than pytest (INV-1, INV-2, INV-4,
-INV-5, INV-13, INV-14). The setup wizard has no spec coverage at all yet — its tests
-stay uncited until a wizard section is added.
+**Checking conformance:** `grep -rn "FR-\|TR-\|INV-" server/tests client/tests
+setup/tests` finds every citing test; cross-reference against the requirement IDs in
+FUNCTIONAL.md/TECHNICAL.md to see what's uncited. Some areas have no test surface at
+all yet (the setup wizard) or are enforced by review rather than pytest
+(process-level invariants like INV-1, INV-2, INV-4, INV-5, INV-13, INV-14) — an
+uncited requirement there is expected, not automatically a gap.
 
 ## The alignment loop in practice
 
@@ -109,7 +115,9 @@ the test or the spec.
 **Periodic drift review** (e.g. at each phase end): sweep the spec against the code the
 same way stale docs were swept — every number, threshold, message type, and behaviour
 claim in the spec must be traceable to current code. The spec carries a *Last verified
-against code* date in each document header for this purpose.
+against code* date in each document header for this purpose. A drift review is also
+when narrative tends to have piled up (rule 5 above) — sweep it out to
+`docs/archive/spec/` in the same pass.
 
 ## Relationship to other documents
 
@@ -123,5 +131,9 @@ against code* date in each document header for this purpose.
 - **docs/BRIEF_*.md** (and `docs/archive/`) record design rationale — the *why* behind
   requirements. The spec states the *what*; a requirement may point at a brief for
   rationale but must stand alone.
+- **docs/archive/spec/** holds narrative trimmed from live requirements (rule 5
+  above) — dated measurements and incident write-ups that explained a past change,
+  not current behaviour. `docs/spec/` is always the present tense; this is its past
+  tense.
 - **README/docs sub-pages** are marketing/user-facing derivatives; they must never
   contradict the spec.

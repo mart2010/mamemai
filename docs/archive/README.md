@@ -9,3 +9,7 @@ A brief moves here only when its phase is 100% complete, including verification.
 
 `PLAN_phases_1-13.md` is the frozen task-by-task history of the implementation plan
 (archived 2026-07-14); the living `../PLAN.md` carries only the still-open work.
+
+`spec/` holds narrative trimmed out of `../spec/` (measurements, incident write-ups,
+"was X until Y" comparisons) each time a requirement is edited back down to
+present-tense — see `spec/README.md`.

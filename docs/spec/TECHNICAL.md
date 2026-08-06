@@ -1,6 +1,6 @@
 # Technical Specification
 
-*Last verified against code: 2026-07-16*
+*Last verified against code: 2026-08-06*
 
 Internal contracts: architecture, protocol, formats, data model, algorithms. Terms per
 [GLOSSARY.md](GLOSSARY.md); conventions per [SPEC.md](SPEC.md). File references anchor
@@ -17,16 +17,13 @@ design discussion, never a patch.
   procedure writes and brief generation happen only in the offline pipeline or the
   bundle installer. Turn content reaches the DB only via the JSONL session log and
   offline replay.
-  **Configuration writes are the one exception, and are enumerated** (amended
-  2026-08-02): a matched *Directive* may write the `personas` or `users` row it names —
-  and nothing else. This is a correction rather than a loosening. FR-701 makes voice the
-  only configuration surface and requires every voice-configurable setting to be a
-  DB-backed `User`/`AssistantPersona` attribute, so a setting changed by voice *must* be
-  written from the live path; the invariant as first written forbade that outright, which
-  made FR-701 unimplementable. It was written when the only conceivable live write was
-  memory formation, which is what it exists to prevent. A single-row `UPDATE` of a
-  configuration column is not memory formation: bounded, synchronous, no model involved,
-  and it cannot grow the memory store.
+  **Configuration writes are the one exception, and are enumerated**: a matched
+  *Directive* may write the `personas` or `users` row it names — and nothing else.
+  FR-701 makes voice the only configuration surface and requires every
+  voice-configurable setting to be a DB-backed `User`/`AssistantPersona` attribute, so a
+  setting changed by voice *must* be written from the live path. A single-row `UPDATE`
+  of a configuration column is not memory formation: bounded, synchronous, no model
+  involved, and it cannot grow the memory store.
 - **INV-2 — Dependency rule.** `domain/` imports nothing external; `services/` imports
   domain only and defines all ports; `infrastructure/` implements ports. Inner layers
   never import from outer ones.
@@ -96,10 +93,7 @@ design discussion, never a patch.
   known to no registry at all**, not merely absent from the one being built: a persona
   implements the capabilities it has, and a name registered elsewhere (e.g.
   `cognitive_coach`, which has selection and assessment strategies but deliberately no
-  enrichment one) is declining that capability, not misconfigured. Keying the warning on
-  the registry instead made it fire on every server start and every offline run
-  (2026-08-03); until then only a wholly-empty registry was exempt, which covered
-  `RECALL_GATE_FACTORIES` and nothing else.
+  enrichment one) is declining that capability, not misconfigured.
 - **TR-005** One registry entry serves every persona of that class (any target
   language); everything persona-specific comes from the persona's rows and `settings`,
   never from strategy code.
@@ -152,17 +146,13 @@ design discussion, never a patch.
   word keeps its attack. While an utterance is open, speech frames are sent immediately
   and **silence frames are still not sent** — the pre-roll lead-in is the only silence
   Whisper receives.
-  The onset gate exists because a *single* noise-classified frame used to arm a whole
-  turn: measured 2026-08-03, **49 of 65 `end_utterance` events transcribed to empty**, so
-  three quarters of the machine's STT budget went to room noise re-triggering the mic the
-  moment TR-205 restored it after playback — each burst paying a full `medium`-model pass
-  plus language detection. Whether intra-utterance silence should also be sent (so Whisper
-  sees natural audio, as TR-957 benchmarked it) is open and unmeasured — see docs/PLAN.md.
+  The onset gate exists because a *single* noise-classified frame can otherwise arm a
+  whole turn, burning a full STT pass on room noise re-triggering the mic the moment
+  TR-205 restores it after playback. Whether intra-utterance silence should also be
+  sent (so Whisper sees natural audio) is open — see docs/PLAN.md.
 - **TR-204** End-of-utterance: after speech has been active, **> `silence_frames`
   consecutive silent frames** (default 50, ~1.5 s) sends `end_utterance` and resets.
   Silence before any speech sends nothing.
-  The default was 25 (~750 ms) and truncated **4 of 16 turns** in the 2026-08-03 session,
-  always at a natural thinking pause ("et on voit une couleur bleue … par rapport à nos").
   How long a speaker pauses mid-thought is a property of the speaker, which is why this is
   configurable (TR-201) rather than a constant. It is a direct latency trade — the server
   cannot begin transcribing until it elapses — so it is set to what a slow talker needs
@@ -213,20 +203,7 @@ design discussion, never a patch.
   detected-language `[lang:code]` prefix (`_render_turn_content`, FR-114) —
   rendering-only, stored content untouched; a turn without a recorded language renders
   untagged.
-- **TR-304** `[RETIRED 2026-08-02 — the in-band response-tag channel is gone.` No
-  control signal is parsed out of the reply stream any more: no `[FOCUS: wish]` scan, no
-  `_PREFIX_SCAN_WINDOW_CHARS` lead-in buffer, no `[TOPIC_CONTINUATION]`/`[TOPIC_BREAK]`.
-  Signalling inside the stream that is simultaneously being spoken cost first-audio
-  latency on every turn for every persona, leaked into audio whenever a multilingual
-  model translated its own control token (`[Focalizza: …]`, 2026-07-13), and needed
-  per-model prompt scaffolding to emit reliably. The topic markers additionally had a
-  parser but never a producer — no prompt ever asked for them — so they only fired by
-  accident. Replacements: a persona switch still forces a conversation break, decided
-  before the LLM is called (TR-315); focus detection on the user turn and offline topic
-  segmentation are both deferred by decision, see docs/BRIEF_inband_tags.md. A model
-  emitting a bracket marker unprompted is caught by the generic marker strip
-  (TR-308/FR-106), which is now the only thing standing between a stray tag and the
-  speaker.`]
+- **TR-304** `[RETIRED 2026-08-02]`
 - **TR-305** Cast voice selection is per-segment and language-based, not tag-based:
   each complete sentence is classified by its own dominant language
   (`LanguageDetector.detect`) and a confident match selects that segment's synthesis
@@ -239,37 +216,24 @@ design discussion, never a patch.
   persona: its cast keys, its own response language, and `User.primary_language`; fewer
   than two of those means no detection at all. A single-voice persona never calls the
   detector, because its text has only one voice it could be spoken by.
-  This was reversed for one day (2026-08-02) and restored the same day, which is worth
-  recording: detection ran for every persona over every installed language, as a safety
-  net for a model that kept answering in the old language for a turn after a language
-  switch — heard in a real session as a French voice reading English. The net worked but
-  charged every persona for one persona's problem and put a seven-way guess in front of
-  text with one possible voice, and it forced `_session_voice` to resolve unregistered
-  languages through the machine's language→voice map, which for a cast persona *discards*
-  the deliberately chosen anchor. FR-708's one-phrasing rule removes the cause instead of
-  correcting the symptom downstream: the switch is asked for in the language being
-  switched to, so the model's last user turn agrees with its instruction.
 
 - **TR-306** Selection batches: fetched lazily on a strategy persona's first active
   turn (`select_items(persona_id)`, a live DB *read*), stored per persona id in working
   memory; one item popped per turn.
   **Pacing is declared by the persona, applied by the pipeline** (`SelectionPacing` on
-  `PersonaSelectionPort`, 2026-08-02). Two rules moved out of `ProcessTurn`, where they
-  had been every persona's law: `refetch_when_exhausted` (default `False` — a batch that
-  runs dry stays dry) and `include_activation_turn` (default `False` — the turn a
-  directive switches to a persona brings no content, leaving it free to greet). Both
-  defaults reproduce the previous behaviour exactly, and a strategy that declares no
-  `pacing` gets `DEFAULT_SELECTION_PACING`, so absence remains the default rather than
-  boilerplate. `include_activation_turn` never applies to a *blocked* switch regardless
-  of the declaration: that turn activates nobody, it explains that a persona is
-  unavailable.
+  `PersonaSelectionPort`). Two rules live outside `ProcessTurn`: `refetch_when_exhausted`
+  (default `False` — a batch that runs dry stays dry) and `include_activation_turn`
+  (default `False` — the turn a directive switches to a persona brings no content,
+  leaving it free to greet); a strategy that declares no `pacing` gets
+  `DEFAULT_SELECTION_PACING`. `include_activation_turn` never applies to a *blocked*
+  switch regardless of the declaration: that turn activates nobody, it explains that a
+  persona is unavailable.
   Generic code still owns the mechanics — when to call, where the batch lives, one item
   per turn, and how it renders into the prompt. Deliberately a small declared policy
   rather than handing the persona the turn: the wider inversion is the persona contract's
-  job (docs/BRIEF_persona_contract.md), and designing it from a single not-yet-built
-  persona is the failure mode that note warns against. Items-per-turn was **not** made
-  configurable — no evidenced need, and it would ripple through the injection renderer.
-  `select_items` still takes `focus`, but nothing supplies it since TR-304 was retired —
+  job (docs/BRIEF_persona_contract.md). Items-per-turn is **not** configurable — it
+  would ripple through the injection renderer.
+  `select_items` still takes `focus`, but nothing supplies it today —
   it is always `None` and every persona gets its default batch. The port keeps the
   parameter, and the strategy side that interprets a wish stays intact, for the user-turn
   detection that replaces the marker (deferred, docs/BRIEF_inband_tags.md).
@@ -301,18 +265,16 @@ design discussion, never a patch.
   also on `.`); spaces — including NBSP and narrow NBSP — always group, never decimalise.
   Grouping requires a separator followed by **exactly three digits**, which is the only
   thing distinguishing "7,840" (7840 in English) from "7,84" (7.84 in French); anything
-  not so grouped takes the original bare-digits path unchanged. Before 2026-08-03 the
-  pattern was a bare `\d+`, so "12 000" was spelled as two numbers — "douze zéro", since
-  `num2words(0)` is "zéro". Years carry no separator, which is why every date read
-  correctly and the bug survived to a live session. Since TR-304's retirement
-  the marker strip is the **only** thing between a bracket token and the speaker — no
-  control tag is resolved upstream any more — so it is load-bearing rather than a
+  not so grouped takes the original bare-digits path unchanged. Years carry no
+  separator.
+  The marker strip is the **only** thing between a bracket token and the speaker — no
+  control tag is resolved upstream — so it is load-bearing rather than a
   backstop, and the first sentence is synthesised as soon as it completes, with no
   lead-in buffer ahead of it — and **sent** as soon as it is synthesised (TR-316).
 - **TR-309** Rolling summary: when `total_turn_count % 50 == 0`, the oldest 25 recent
   turns are LLM-summarised into (or merged with) `rolling_summary` and dropped from the
   window.
-- **TR-310** `[RETIRED 2026-07-18 — replaced by directive-based switching, TR-315]`
+- **TR-310** `[RETIRED 2026-07-18]`
 - **TR-311** Latency instrumentation: `[latency]` stdout lines for STT, first LLM
   token, first TTS chunk, **first audio sent**, total turn, inter-turn gap. Plus one
   `[llm] context:` line per live reply — estimated prompt tokens against the usable
@@ -322,30 +284,28 @@ design discussion, never a patch.
 - **TR-312** Turn timestamps: the user turn is stamped at `end_utterance` receipt; the
   assistant turn is stamped when the LLM stream finishes — the assistant→user delta is
   the stored response-latency proxy consumed by tutor assessment (TR-806).
-- **TR-313** `[RETIRED 2026-07-18 — see FR-113]`
-- **TR-314** Recall gating (`RecallGate`, FR-309): replaces the earlier per-turn LLM
-  classification call (`RecallIntentDetector`, retired) with local, deterministic
-  logic — no LLM call, no JSON parsing, no dependency on `[llm].provider`.
+- **TR-313** `[RETIRED 2026-07-18]`
+- **TR-314** Recall gating (`RecallGate`, FR-309): local, deterministic logic — no LLM
+  call, no JSON parsing, no dependency on `[llm].provider`.
   `should_embed(text)` runs first, before any embedding is computed: `DefaultRecallGate`
   (used by GA and any persona without an override) returns `False` unless the text
-  contains a literal `"?"` **and** clears `min_words` (6, raised 2026-07-30 from 3
-  alongside adding the `"?"` requirement — together they exclude both plain statements
-  and short reflexive questions like "How are you?", since word count alone can't tell
-  those apart from a real recall-worthy question of similar length); a word-count
-  floor, not a character count, since it tracks "is there searchable content here"
-  consistently across languages, though `"?"` itself is an STT-punctuation proxy, not
-  perfectly reliable across languages/phrasings (faster-whisper infers it from
+  contains a literal `"?"` **and** clears `min_words` (6) — together they exclude both
+  plain statements and short reflexive questions like "How are you?", since word count
+  alone can't tell those apart from a real recall-worthy question of similar length; a
+  word-count floor, not a character count, since it tracks "is there searchable content
+  here" consistently across languages, though `"?"` itself is an STT-punctuation proxy,
+  not perfectly reliable across languages/phrasings (faster-whisper infers it from
   intonation/syntax, doesn't guarantee it — accepted approximation, same posture as
-  the word-count floor itself). `LanguageTutorRecallGate` (its own always-`True`
-  override) was removed the same day: the tutor's single-word vocabulary answers
-  don't need their own recall search after all — the item currently being tested is
+  the word-count floor itself). No persona currently registers an override
+  (`RECALL_GATE_FACTORIES` in `server.py` is empty but kept as its own registry,
+  parallel to `SELECTION_STRATEGY_FACTORIES` et al. — a future persona-type may still
+  need a distinct policy here): the tutor's single-word vocabulary answers don't need
+  their own recall search either — the item currently being tested is
   already injected via `LanguageTutorSelectionStrategy.select_items` (a separate
   mechanism, reading `persona_state`/spaced-repetition scheduling directly, FR-501/
   506), independent of recall entirely; a bare "agua" answering the tutor's own
   prompt doesn't need an additional generic memory search on top of that context.
-  `RECALL_GATE_FACTORIES` (`server.py`) is now empty but kept as its own registry,
-  parallel to `SELECTION_STRATEGY_FACTORIES` et al. — a future persona-type may still
-  need a distinct policy here. When `should_embed` is `True`, the turn's
+  When `should_embed` is `True`, the turn's
   raw text (not an extracted query — there is no extraction step anymore) is embedded
   and compared, via `domain.model.cosine_similarity`
   (in-process, no DB round trip), against **every** entry in
@@ -360,8 +320,7 @@ design discussion, never a patch.
   existing merge-threshold "same thing" bar); at or above it, the DB round trip is
   skipped and the best-matching historical entry's cached results are reused as-is,
   appended as a new entry to `recall_history` only when a real search actually runs.
-  `search()` is called with every `MemoryType` (no type restriction — the old
-  detector's type classification is not replaced by an equivalent, since the existing
+  `search()` is called with every `MemoryType` (no type restriction — the existing
   top-5-by-similarity ranking already surfaces the right items across types). Gate
   resolution mirrors `selection_strategies`: `ProcessTurn._recall_gates.get(persona_id,
   default_recall_gate)` — the one difference from `PersonaSelectionPort` et al. being
@@ -372,42 +331,34 @@ design discussion, never a patch.
   a turn recall never even ran on.
   `is_relevant(similarity)` is the gate's third decision, applied to each row `search`
   returns before composition (FR-309). `DefaultRecallGate` keeps rows at or above
-  `MIN_RECALL_SIMILARITY` (**0.84**). **Measured, not chosen**, and re-derived on
-  2026-08-04 when the `query:`/`passage:` prefixes were adopted (TR-508b) — the previous
-  0.85 was derived on the unprefixed scale, where it initially separated cleanly and, on
-  the same database a day later, no longer did (1 false recall, 1 lost). Probe questions
-  in French, English and Italian against the real database, half about subjects genuinely
-  stored and half genuinely absent, scored by each probe's best hit: absent 0.769–0.834
-  (n=15), present 0.833–0.903 (n=16).
-  The value comes off the **error curve**, not the range: zero false recalls begins at
-  0.8342, and every floor from 0.835 to 0.840 gives the same result, so 0.84 sits
-  mid-plateau rather than on the boundary. It is deliberately *not* the total-error
-  minimum — a false recall makes the assistant claim a memory it does not have, the
-  failure FR-309's honesty branch exists to prevent, while a lost recall merely answers
-  without citing memory. Verified end to end through the real repository after the
-  backfill: 0 false recalls, 1 lost.
-  Known limit: a single **global** floor works only because the per-language bands happen
-  to overlap (margins +0.018 fr, +0.027 en, +0.017 it — all positive individually). A
-  language-aware floor is the principled fix and is recorded as follow-up. What survives the floor is also what
-  gets cached in `recall_history`, empty results included: a repeated question that found
-  nothing must not pay for a second lookup that cannot find anything either (INV-1).
+  `MIN_RECALL_SIMILARITY` (**0.84**), calibrated against the real database (on the
+  `query:`/`passage:`-prefixed embedding scale, TR-508b) rather than guessed. It is
+  deliberately *not* the total-error minimum — a false recall makes the assistant claim
+  a memory it does not have, the failure FR-309's honesty branch exists to prevent,
+  while a lost recall merely answers without citing memory, so the floor is set to
+  favour avoiding the former.
+  Known limit: a single **global** floor works only because the per-language similarity
+  bands happen to overlap. A language-aware floor is the principled fix and is recorded
+  as follow-up. What survives the floor is also what gets cached in `recall_history`,
+  empty results included: a repeated question that found nothing must not pay for a
+  second lookup that cannot find anything either (INV-1).
 - **TR-315** Directive matching (`ProcessTurn.execute` step 3b, FR-207): runs
   unconditionally on every non-empty turn, independent of `RecallGate` (TR-314) and
   needing no embedding call at all — a directive phrase is a short, closed-vocabulary
-  command, exactly the case where a deterministic rule outperforms a similarity search
-  (replaced the embedding-similarity design 2026-07-30, and first-classed off `Concept`
-  entirely the same day: `domain.model.Directive` — `id`, `target_persona_id`,
-  `action`, `language`, `trigger`, `description` — its own `directives` table, not a
+  command, exactly the case where a deterministic rule outperforms a similarity search.
+  `domain.model.Directive` — `id`, `target_persona_id`,
+  `action`, `language`, `trigger`, `description` — is its own first-class domain object,
+  its own `directives` table, not a
   memory type; no `engagement_level`, no embedding column, never touched by recall's
-  `search()` at all). The turn's raw text is checked via `services.directives.
+  `search()` at all. The turn's raw text is checked via `services.directives.
   matches_trigger(trigger, text)` against every entry in `WorkingMemory.directives`
   (fetched once at session start via `DirectiveRepository.list_all()` — same
   fetch-once posture as `memory_brief`); among every entry that matches, the one
-  requiring the **most keywords** wins, not the first in list order (found
-  live-testing 2026-07-30: one persona's name can be a strict word subset of
-  another's — e.g. "Coach" vs "Old Coach" — so an utterance naming the more specific
-  one satisfies both triggers; picking list order silently resolved to whichever was
-  created first, regardless of which name the user actually said). Ties (equal
+  requiring the **most keywords** wins, not the first in list order — one persona's
+  name can be a strict word subset of another's (e.g. "Coach" vs "Old Coach"), so an
+  utterance naming the more specific one satisfies both triggers; list order would
+  resolve to whichever was created first, regardless of which name the user actually
+  said. Ties (equal
   keyword count) fall back to list order (ascending `Directive.id`). A trigger is
   `{"keywords": [...], "max_words": N}`
   (`Directive.trigger`): fires when every keyword occurs as a case-insensitive
@@ -458,7 +409,7 @@ design discussion, never a patch.
   silently let the new persona's turns be attributed to the old persona's conversation
   record for consolidation — breaking FR-303's persona-scoping, TR-704's
   assessment-strategy dispatch (keyed on `conversation.persona_id`), and FR-504's
-  episode exemption for tutor sessions (found live-testing 2026-07-20, FR-310).
+  episode exemption for tutor sessions.
 
 - **TR-316** Audio streaming: `ProcessTurn.execute` takes an optional `emit_audio`
   sink (`AudioSink = Callable[[bytes], Awaitable[None]]`) and delivers each synthesised
@@ -472,13 +423,8 @@ design discussion, never a patch.
   accumulates as before (the LLM quality gates want the whole reply in hand). The
   asymmetry is deliberate: a handler that both supplies a sink and sends `audio_chunks`
   produces silence, which is obvious, rather than every sentence played twice.
-  This restores behaviour the pre-`5e83853` server had and the domain-layer refactor
-  removed: audio became a `list[bytes]` returned at the end, so nothing reached the client
-  until the whole reply was synthesised. Every test still passed, because the audio was
-  all still *there* — only late. Measured cost of that regression, 2026-08-04: generation
-  is 16.6 s of a 22.7 s turn, so the user waited out the entire reply before hearing its
-  first sentence. Tests therefore assert **when** audio left relative to generation, not
-  that it exists; "audio was produced" is precisely the assertion that missed this.
+  Tests assert **when** audio left relative to generation, not merely that it exists —
+  "audio was produced" is not the same claim as "audio was streamed".
   A sink that raises (client gone) aborts the turn with the already-sent segments
   delivered — a truncated reply rather than a silent one; `server.py` logs it and still
   sends `speaking_end` so the mic is restored.
@@ -552,13 +498,9 @@ design discussion, never a patch.
   is a **passage**. `MemoryUpserter` uses `embed_passage` on both sides of its
   insert-vs-merge search — that comparison is document-to-document, so one prefix keeps
   both halves on the scale its thresholds were derived against.
-  Shipped without the prefixes until 2026-08-04, which compressed the scale: an absent
-  subject scored 0.8536 against a present one at 0.8368, so no floor separated them and
-  the 0.85 then in force produced 1 false recall and 1 lost recall on the real database.
-  With the prefixes the absent ceiling falls to 0.8341 and the floor clears it — measured
-  0 false recalls, 1 lost, end to end through the real repository (TR-314).
-  Using `query: ` on *both* sides (e5's symmetric recipe) was measured and **rejected**:
-  6 errors against 2, because it lifts absent probes as much as present ones.
+  Using `query: ` on *both* sides (e5's symmetric recipe) is deliberately **not** used:
+  it lifts absent probes as much as present ones, defeating the separation the
+  asymmetric roles exist to provide.
   Changing either prefix string invalidates every stored embedding; the backfill is
   `scripts/reembed_memories.py`, and the text it embeds comes from the shared
   `services.upsert.embeddable_text` so a backfill cannot drift from the live path.
@@ -617,8 +559,8 @@ consolidation, enrichment, and bundle install.
   same None-means-unscoped convention `search` already used, and a read path only.
   `list_episodes(limit)` returns episodes most recent first (`happened_at` descending,
   `created_at` breaking ties); episodes are unscoped by nature (INV-10) rather than by
-  permission, and before this (2026-08-02) were reachable only by similarity `search`,
-  which cannot answer "what happened lately".
+  permission — a dedicated listing exists because similarity `search` alone cannot
+  answer "what happened lately".
 - **TR-609** `upsert_concept` is origin-aware (FR-310): candidates are searched as
   usual (TR-601/602), then split by `Concept.origin`. If the best *authored* candidate's
   similarity ≥ `authored_protection_threshold` (default 0.75, its own constant — not
@@ -627,20 +569,19 @@ consolidation, enrichment, and bundle install.
   description/embedding, engagement bumped, `update_description` ignored. Otherwise the
   normal two-tier merge/insert (TR-602) runs scoped to *organic* candidates only. A
   brand-new organic insert (`existing is None`) additionally requires `_has_engagement`:
-  at least `min_concept_engagement_turns` (default **1** — provenance is binary; it was
-  2 until 2026-08-02) of the caller-supplied
+  at least `min_concept_engagement_turns` (default **1** — provenance is binary) of the
+  caller-supplied
   `user_turns` (raw text) must literally name the concept (`_mentioned_in` — whole-word,
   case-insensitive regex match on the candidate's `name`, also matching a parenthetical
-  abbreviation split out of it, e.g. "XAI" out of "Explainable AI (XAI)"). Embedding
-  cosine-similarity between a turn and the candidate's own embedding was the original
-  design (`concept_engagement_similarity`, reusing TR-807's `interest_cluster_threshold`)
-  but was replaced 2026-07-20 after a live-testing finding: several sibling concepts
-  extracted from one assistant monologue on a shared topic (e.g. AI/XAI/NLP/Transfer
-  Learning) sit close together in embedding space, so a couple of broadly-on-topic user
-  turns satisfied the similarity bar for *all* of them, not just the one actually
-  followed up on — literal mention is the intersection of "what the conversation
-  introduced" with "what the user's own words actually named," which similarity-to-topic
-  could not express. `user_turns=None` (the default; `bundle_install`/`EnrichMemory`
+  abbreviation split out of it, e.g. "XAI" out of "Explainable AI (XAI)"). Literal
+  mention, not embedding similarity to the candidate, is deliberate: several sibling
+  concepts extracted from one assistant monologue on a shared topic (e.g. AI/XAI/NLP/
+  Transfer Learning) can sit close together in embedding space, so a similarity bar
+  would let a couple of broadly-on-topic user turns satisfy engagement for *all* of
+  them, not just the one actually followed up on — literal mention is the intersection
+  of "what the conversation introduced" with "what the user's own words actually
+  named," which similarity-to-topic cannot express. `user_turns=None` (the default;
+  `bundle_install`/`EnrichMemory`
   never pass it) skips this check entirely — only live-conversation extraction has turns
   to evaluate.
   On a *merge* into an existing **organic** concept, a qualifying `_has_engagement` also
@@ -759,9 +700,9 @@ only validation layer.
 - **TR-901** A bundle is a directory: `bundle.toml` manifest + `lessons/*.toml`, lessons
   ordered by filename sort. A bundle must carry a `[persona]` definition, at least one
   lesson, or both; only the bundle with neither is rejected. Persona-only (no `lessons/`
-  at all) is first-class as of 2026-08-02 — a persona that consumes the memory substrate
-  rather than authoring curriculum has nothing to ship, and previously had to invent a
-  dummy lesson file to install. The mirror case, content-only, was always supported.
+  at all) is first-class — a persona that consumes the memory substrate rather than
+  authoring curriculum has nothing to ship. The mirror case, content-only, is also
+  supported.
 - **TR-902** Manifest: `format_version` (must equal 1), `persona_key` (non-empty
   string), `[bundle]` table with required `name`, `version`, `author` (+ optional
   `description`), optional `[provenance]`; `[bundle]`+`[provenance]` are persisted
@@ -773,8 +714,8 @@ only validation layer.
   FR-407) and `reads_across_personas` (bool, default false — FR-303); a non-bool for
   either is rejected rather than coerced. Unknown keys are rejected.
   `languages` may be absent or empty (= no language restriction) and `response_language`
-  may be absent (= derive from `User.primary_language` at install), both since
-  2026-08-02: a persona that is not *about* a language has no target list to give, and a
+  may be absent (= derive from `User.primary_language` at install): a persona that is
+  not *about* a language has no target list to give, and a
   bundle cannot know which language its user speaks. Same pair-independence rule that
   already governs `voices["default"]` — an English-authored bundle must not answer a
   French user in English. A bundle that does care still states both.
@@ -787,7 +728,7 @@ only validation layer.
   absent — the *session language pair* — unless the bundle's list is *empty*, which
   already means "no restriction" and is left empty rather than narrowed to the primary
   language alone. An absent `response_language` is likewise resolved to
-  `User.primary_language` at install (2026-08-02).
+  `User.primary_language` at install.
   The update is split by **who can know the value**, not by convenience. The bundle
   refreshes what only its author can know — `system_prompt` (the main thing an upgrade
   delivers), `settings`, `extracts_episodes` (FR-407) and `languages`. It never touches
@@ -849,22 +790,15 @@ only validation layer.
   pipeline per voice-prefix language, output resampled 24 kHz → 16 kHz float32);
   embeddings `intfloat/multilingual-e5-large` (1024-dim, always local/CPU-or-GPU —
   never remote, TR-955), encoded **with the `query:`/`passage:` prefixes it was trained
-  with** (TR-508b). Until 2026-08-04 it was raw text, which compressed the usable
-  similarity range; the prefixes, the re-embedding of every stored row, and the
-  re-derivation of every threshold that reads the scale (TR-314's recall floor,
-  `[memory]`'s merge/disambiguate bars) were done together, because a prefixed query
-  against unprefixed passages is worse than neither.
+  with** (TR-508b).
   **Every local Ollama call sends `num_ctx` explicitly** (`[llm] num_ctx`, TR-951).
   Ollama's own default is 4096 tokens and it truncates longer prompts *silently* — no
   error, no warning, no field in the response — so the model answers about a prompt it
-  was never shown. Measured 2026-08-03: identical transcript, only the context changed —
-  a 72-turn conversation extracted **0 concepts at 4096** and **6 concepts + 3 episodes
-  at 16384**, and across 264 sweep runs every transcript over ~14 000 characters (~4 400
-  tokens of French) extracted zero, 100% of the time. That is what earlier entries here
-  and in FR-307 recorded as a "length cliff" in the model's attention; there is no such
-  cliff. 16384 is sized to the workload, not to the model's ceiling (llama3.1:8b reports
-  131072): the KV cache scales with `num_ctx`, so the useful value is min(model ceiling,
-  what VRAM allows, what the workload needs).
+  was never shown; there is no inherent "length cliff" in the model's attention, only
+  silent truncation at whatever `num_ctx` is set to. 16384 is sized to the workload,
+  not to the model's ceiling (llama3.1:8b reports 131072): the KV cache scales with
+  `num_ctx`, so the useful value is min(model ceiling, what VRAM allows, what the
+  workload needs).
   **A prompt that still exceeds the budget is announced, never truncated in silence** —
   the defect is the silence, not the overflow. Estimated prompt tokens are compared
   against `num_ctx` minus a flat output reserve before every call whose input grows with
@@ -895,15 +829,14 @@ only validation layer.
 - **TR-955** Live conversation's main reply (`ProcessTurn`'s call to
   `LLMService.complete()`) is the only part of the pipeline `[llm].provider` affects
   (FR-707): `"ollama"` (default) uses `OllamaLLMService` against `[llm].model`/
-  `ollama_host`, same as before this setting existed; `"openai_compatible"` uses
+  `ollama_host`; `"openai_compatible"` uses
   `OpenAICompatibleLLMService` (`infrastructure/llm/openai_compatible.py`, a generic
   `openai.AsyncOpenAI` client against `[llm].base_url`, any OpenAI-compatible provider —
   OpenRouter, OpenAI, a self-hosted server; a missing `api_key` is coalesced to a
   placeholder string, since the client library requires some value even against
   endpoints that don't check it) against `[llm].base_url`/`remote_model`/`api_key`.
-  Recall gating (TR-314) does *not* move with this setting — it stopped being an LLM
-  call at all when `RecallIntentDetector` was retired in favour of `RecallGate`, so it
-  no longer has a live-provider dimension to branch on. Every other LLM-touching port
+  Recall gating (TR-314) does *not* move with this setting — it is not an LLM call at
+  all, so it has no live-provider dimension to branch on. Every other LLM-touching port
   (offline judgment adapters, TR-953; `GenerateMemoryBrief`, via a dedicated
   `ServerContext.offline_llm` instance never aliased to the live `llm`; Ollama-backed
   persona-strategy helpers, e.g. the tutor's focus interpreter) always stays on the
@@ -917,8 +850,8 @@ only validation layer.
   speech. (3) A **stock-phrase blocklist** (`_is_stock_hallucination`) drops segments
   whose normalised text contains any known caption-boilerplate fragment, regardless of
   `no_speech_prob`. (3) exists because (2) is structurally unable to catch a *confident*
-  hallucination: observed live 2026-07-18 on a silent mic, "Thanks for watching, and
-  I'll see you in the next video." cleared the 0.6 threshold. These artifacts are
+  hallucination — e.g. "Thanks for watching, and I'll see you in the next video." on a
+  silent mic can clear the 0.6 threshold. These artifacts are
   decodings of noise, not misheard speech, so no acoustic signal separates them — only
   the text does, and the phrases are stable because they saturate Whisper's caption
   training data. Matching is substring-on-normalised-text; `_normalise` folds
@@ -930,25 +863,20 @@ only validation layer.
   prints an `[stt] dropped stock hallucination` line, the only place a false positive
   would surface.
 - **TR-957** STT CPU threading: `[stt] cpu_threads` (default `DEFAULT_CPU_THREADS = 8`) is
-  passed to `WhisperModel`. Left unset, CTranslate2 picks its own intra-op count — 4 on
-  this machine, measured — so a 24-core box ran STT on a sixth of itself. The default is a
-  **measured constant, not `nproc`**: on `medium`/int8 over 28.7 s of audio, 4 threads took
-  20.0 s, 8 took 13.8 s, 16 took 14.4 s and 24 took 15.3 s. Throughput peaks at 8 and
-  *degrades* beyond it — the int8 GEMM saturates memory bandwidth long before it runs out
-  of cores — so binding to core count would be a slower default than a fixed 8. Transcripts
-  are byte-identical at every setting, so this is free latency and never an accuracy trade.
-  Overridable, since the sweet spot is hardware-specific.
-  `large-v3-turbo` was measured against `medium` on the same audio at the same 8 threads
-  and **not adopted**: 4.06 s per utterance against medium's 2.75 s (48% slower) for one
-  extra correct letter ("noctulescents" against medium's "noctulecents"). Its speed
-  reputation comes from a 4-layer decoder replacing 32, but its encoder is large-v3-sized —
-  bigger than medium's — and on CPU the encoder is what dominates. On a GPU the ranking
-  would likely invert; that is untested here (no CUDA — CTranslate2 has no ROCm backend,
-  and this machine's GPU is AMD).
-  Related measurement, recorded so it is not re-attempted: `beam_size` is **not** a useful
-  latency knob here. Dropping it from 5 to 1 saved 4% (20.95 s → 20.03 s) and cost accuracy
-  ("les nuages noctules et sans" for "noctulescents"), because on CPU the encoder pass over
-  a fixed 30 s mel window dominates and beam width only touches the decoder.
+  passed to `WhisperModel`, overriding CTranslate2's own intra-op auto-detection, which
+  under-uses a multi-core box. 8 is a measured constant, not `nproc`: throughput peaks
+  around 8 threads and degrades beyond it, since the int8 GEMM saturates memory
+  bandwidth before it runs out of cores — so binding to core count would be a slower
+  default. Transcripts are byte-identical at every thread setting, so this is free
+  latency and never an accuracy trade. Overridable, since the sweet spot is
+  hardware-specific.
+  The model is `medium`, not `large-v3-turbo`: on CPU the encoder dominates cost, and
+  `large-v3-turbo`'s encoder is large-v3-sized despite its lighter decoder, so it runs
+  slower than `medium` here for negligible accuracy gain; on a GPU the ranking would
+  likely invert (untested — this machine's GPU is AMD, and CTranslate2 has no ROCm
+  backend). `beam_size` stays at 5, not reduced: on CPU the encoder pass over a fixed
+  30 s mel window dominates and beam width only touches the decoder, so a smaller beam
+  buys negligible latency at a real accuracy cost.
 - **TR-958** Minimum utterance floor: `end_utterance` whose buffered audio is shorter than
   `[stt] min_utterance_ms` (default 300) is dropped in `server.py` before any STT call,
   with an `[stt] skipped …ms utterance` line. Duration is derived from TR-101's wire format
@@ -971,31 +899,22 @@ only validation layer.
   RNN descriptor from the *argument*, JIT-compiles a dropout kernel whose source includes
   `<rocrand/rocrand_xorwow.h>`, and fails: the PyTorch ROCm wheel does not ship that
   header, so synthesis dies with a bare `miopenStatusUnknownError` and no indication of
-  the cause (measured 2026-08-04, torch 2.12.1+rocm7.2, gfx1151). Zeroing removes that one
+  the cause. Zeroing removes that one
   kernel while leaving every other MIOpen path intact — unlike disabling the backend
   wholesale, which would also give up the convolutions. Applied unconditionally, not only
   on ROCm: verified bit-identical output either way, so a device-conditional branch would
   buy a second code path and nothing else.
 - **TR-960** Compute-device placement is **per model, not per machine**, and each of
-  `[stt] device`, `[tts] device` and `[embedding] device` is set independently. Auto-detect
-  is not a safe default once torch can see a GPU, because it picks one for everything.
-  Measured on the same integrated AMD GPU (gfx1151), 2026-08-04:
-
-  | component | CPU | GPU | |
-  | --- | --- | --- | --- |
-  | TTS (Kokoro, 8-sentence reply) | **3.47 s** | 25.7 s warm, 49.6 s cold | GPU **7x slower** |
-  | Embedding (e5-large, one turn) | 71 ms | **25 ms** | GPU 2.8x faster |
-  | Embedding (batch of 64) | 1.16 s | **0.81 s** | GPU 1.4x faster |
-
-  Audio was verified identical across devices before the timings were compared. The split
-  is a property of the models, not a quirk: Kokoro is 82M parameters dominated by
+  `[stt] device`, `[tts] device` and `[embedding] device` is set independently.
+  Auto-detect is not a safe default once torch can see a GPU, because it picks one for
+  everything. TTS (Kokoro) runs on CPU and embeddings run on GPU when available — the
+  opposite of what a single "GPU if present" default would pick. The split is a
+  property of the models, not a quirk: Kokoro is 82M parameters dominated by
   *sequential* LSTM steps, so it is latency-bound and a wide parallel device buys it
-  nothing while adding per-kernel launch overhead; e5-large is a 560M transformer whose
-  work is one big parallel pass. Cold cost also differs — Kokoro's first GPU synthesis
-  paid 22.6 s of MIOpen JIT compilation, dropping to 13.4 s once `~/.config/miopen` was
-  populated, which is per-machine state no fresh install has.
-  Corollary for measurement: this is why `[tts] device` must be explicit even when the
-  value is `"cpu"`, and why the integration TTS test pins it.
+  nothing while adding per-kernel launch overhead and a costly cold JIT-compile pass on
+  first GPU use; e5-large is a 560M transformer whose work is one big parallel pass, so
+  it benefits from the GPU. `[tts] device` must be explicit even when the value is
+  `"cpu"`, and the integration TTS test pins it.
 - **TR-961** Episode extraction runs as its **own pass over the user's turns only**
   (`user_turns_only`), separate from the concept pass which keeps the full transcript.
   Two passes, not one, because the two need opposite inputs: concepts need the assistant's
@@ -1004,23 +923,18 @@ only validation layer.
   that extracts episodes; personas with `extracts_episodes=False` (FR-407) skip it
   entirely. `_extraction_system_prompt` gained `extract_concepts` as the mirror of the
   existing `extract_episodes`, so each pass requests only its own array.
-  The fabrications this stops are summaries of *assistant* content, so on a user-only
-  transcript they are not discouraged but **unconstructible** — the FR-114 posture, a
-  filter rather than a plea. Measured 2026-08-04 on a 32-turn astronomy conversation, the
-  full transcript produced *"Hier soir, j'ai observé la nébuleuse de l'Oiseau avec mon
-  télescope"* and *"Le week-end dernier, je suis allé au parc"* — two dated first-person
-  life events that never happened. User turns only: **0 episodes**.
+  The fabrications this stops are summaries of *assistant* content — the model
+  narrating its own turns as autobiographical events — so on a user-only transcript
+  they are not discouraged but **unconstructible** — the FR-114 posture, a filter
+  rather than a plea.
   Second, independent filter: **`drop_chat_dated_episodes` discards any episode whose
-  `happened_at` falls within its own conversation's span** (± 60 s). The prompt already
-  demands a time "distinct from 'during this chat'" and cannot enforce it — a model that
-  files the conversation as a life event dates it with the conversation's own timestamp.
-  Measured on the real database: **8 of 9 stored episodes fall inside their conversation's
-  span**, and the ninth misses by 0.02 s only because its timestamp was truncated to whole
-  seconds (hence the tolerance). Every drop prints its reason.
-  The two are complementary, not redundant: the invented Tromsø-style episodes are dated
-  plausibly in the past and only the first filter catches them; "the user was having a
-  conversation with an Italian tutor" survives a user-only transcript and only the second
-  does. Verified together on the shipped path: conversations 23 and 9 both go to **0
-  episodes**, with the date filter visibly firing on 9.
+  `happened_at` falls within its own conversation's span** (± 60 s tolerance, to absorb
+  timestamp truncation). The prompt already demands a time "distinct from 'during this
+  chat'" and cannot enforce it — a model that files the conversation itself as a life
+  event dates it with the conversation's own timestamp. Every drop prints its reason.
+  The two are complementary, not redundant: an episode invented as a past event and
+  dated plausibly in the past is caught only by the user-only-transcript filter; "the
+  user was having a conversation with an Italian tutor" survives a user-only transcript
+  and is caught only by the date filter.
   An episode with a null `happened_at` is kept — undated is not evidence of being about
   the chat, and dropping it would be a different policy from the one stated here.

@@ -1,6 +1,6 @@
 # Functional Specification
 
-*Last verified against code: 2026-07-16*
+*Last verified against code: 2026-08-06*
 
 Externally observable behaviour, by capability. Terms per [GLOSSARY.md](GLOSSARY.md);
 ID and wording conventions per [SPEC.md](SPEC.md). Technical contracts (protocol,
@@ -76,30 +76,14 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
 - **FR-111** Every user and assistant turn must be appended to the session log at the
   moment it happens (the only live write, INV-1); assistant turns record the active
   persona and any conversation-boundary marker.
-- **FR-112** `[RETIRED 2026-08-02 — LLM-declared topic continuity removed with the
-  in-band tag channel (TR-304).` The markers had a parser but no producer: no prompt ever
-  asked for them, so they only fired by accident, and in practice a session already
-  became one conversation unless a persona switch split it. A persona switch still forces
-  a break deterministically (FR-207/TR-315), which remains the only mid-session split.
-  **Known gap, deliberately accepted**: two unrelated topics in one uninterrupted stretch
-  with one persona now consolidate as a single conversation — one worthiness verdict, one
-  summary, extraction over mixed content. Replacing this with offline segmentation at
-  consolidation time is deferred until there are real multi-topic sessions to calibrate
-  against; see docs/BRIEF_inband_tags.md.`]
-- **FR-113** `[RETIRED 2026-07-18 — GA response-language mirroring removed;
-  GA.response_language is now a plain fixed setting like every other persona's (FR-105),
-  with no detection-driven override or not-installed reminder]`
+- **FR-112** `[RETIRED 2026-08-02]`
+- **FR-113** `[RETIRED 2026-07-18]`
 - **FR-114** A user turn is rendered into the LLM context prefixed with its detected
   language as a `[lang:code]` tag **only for a persona that declares
   `sees_turn_language`** — for such a persona the tag distinguishes an on-target
   utterance from an aside in the user's own language, or (a third language) a likely
   pronunciation stumble. Every other persona sees plain text.
-  Narrowed from "all personas" on 2026-08-02 after a live session: STT misdetected an
-  English sentence as French, and the model read the resulting `[lang:fr]` as an
-  instruction — switching language mid-answer and overriding its own standing
-  response-language rule (FR-105). A persona that cannot use the signal must not be
-  shown it; the fix is not to emit it and ask the model to ignore it (the FR-207/TR-304
-  lesson). Tags are context-rendering
+  A persona that cannot use the signal must not be shown it. Tags are context-rendering
   only: stored turns and session logs stay clean (the log's `language` field carries the
   code, TR-402), and a `[lang:]` tag mimicked by the model in its response is stripped
   before TTS, never spoken.
@@ -108,15 +92,8 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
 
 - **FR-201** The GeneralAssistant must always exist (seeded, fixed id), is the persona
   every session starts on, and must be protected: it cannot be removed or deactivated.
-- **FR-202** `[RETIRED 2026-07-18 — replaced by directive-based switching, FR-207. The
-  `[PERSONA:name]` LLM-emitted tag scheme required listing every other persona's name
-  in the system prompt to get the model to notice it reliably, which turned out to
-  also be exactly the kind of salience that caused language drift toward that other
-  persona even when nobody asked to switch — see the language-drift discussion FR-207
-  replaces this with.]`
-- **FR-203** `[RETIRED 2026-07-18 — persona discovery moved to onboarding/FAQ; GA's
-  system prompt no longer names another persona under any circumstance, the actual
-  fix for the drift FR-202 caused.]`
+- **FR-202** `[RETIRED 2026-07-18]`
+- **FR-203** `[RETIRED 2026-07-18]`
 - **FR-204** Persona management use cases exist for create, edit, list, remove,
   deactivate, reactivate — with the rules: creation only while GA is active; system
   personas cannot be removed/deactivated; removal cascades to the persona's concepts,
@@ -189,8 +166,8 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   independent engagement, and every write path (extraction, upsert, enrichment, bundle
   install) stays inside the owning persona's scope. INV-9's cascade is unchanged.
   **Reading is separable, and declared.** A persona may set
-  `AssistantPersona.reads_across_personas` (default false — every persona before
-  2026-08-02) to read concepts and procedures owned by *any* persona. This exists because
+  `AssistantPersona.reads_across_personas` (default false) to read concepts and
+  procedures owned by *any* persona. This exists because
   a persona that works *from* the user's existing memory rather than authoring its own
   cannot otherwise reach it: scoped to itself it would only ever see what it was told
   during its own sessions, which is circular. Read-only by construction — the flag widens
@@ -215,41 +192,13 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   extracted from conversation, for any persona: how-to knowledge belongs to authoring
   expertise (bundles) or persona enrichment, never live discussion.
   **The worthiness prompt states its YES criteria as their own enumerated list, and
-  restricts NO to "nothing but" the excluded categories** (rebalanced 2026-08-02). This is
-  a measured property, not a style preference. The previous wording gave YES one clause and
-  NO five vivid ones; against a labelled probe set llama3.1:8b scored 23/45, getting every
-  *negative* case right (20/20) and almost every positive one wrong — including a plain
-  English "I went to Norway last weekend and finally saw the northern lights, I work as an
-  engineer", which is both a personal fact and a dated event. Live, every French
-  conversation in the database had been judged unworthy (0/4, against 9/18 for English).
-  The rebalance alone scores 40/45; a language-neutrality clause and few-shot examples were
-  each measured on top of it and changed nothing, so neither is in the prompt.
-  The reply is asked for **in English** and parsed by first word across the supported
-  languages' yes/no vocabulary: a French transcript drew a bare "OUI", and the previous
-  substring parse (`"yes" in reply`) read that as NO — a gate misreading its own answer is
-  indistinguishable from a real verdict. An unreadable answer is never a YES.
-  **Extraction is windowed too, and for the same measured reason** — but over *all* windows,
-  not just the ends, since extraction must cover every turn rather than sample the
-  conversation. The same 72-turn conversation yielded 4 concepts from its first 12 turns, 4
-  from its first 24, and **zero** from its first 48 or its full 72, with valid JSON
-  throughout, so a 37-minute session extracted nothing at all.
-  **That cliff was context truncation, not model capacity** (established 2026-08-03 —
-  see TR-951/TR-952): every measurement above was taken at Ollama's default 4096-token
-  window, which silently drops whatever doesn't fit, and the same transcripts at
-  `num_ctx=16384` extract normally.
-  **Windowing survives that correction on its own merits**, re-measured the same day at an
-  explicit `num_ctx`: 4 real conversations (32–72 turns), window sizes 8/16/24/whole, 3
-  repeats, scored on concepts the *user themselves named* (the FR-310 provenance rule —
-  an ungrounded concept is discarded downstream anyway) rather than on volume. Every
-  transcript fit the context with room to spare, and a single whole-conversation call
-  still returned a third of the concepts, half the episodes and 2.5× fewer distinct
-  subjects than the smallest window: a real length effect on extraction, distinct from the
-  truncation that was masking it. Precision is **flat across sizes** (~25% grounded
-  everywhere), so window size is a recall/volume knob and buys no accuracy. The window is
-  16 turns — ~30% more grounded concepts than the 24 it replaced, at half the
-  near-duplicate fragmentation of an 8-turn window, deliberately short of the
-  recall-maximising value to keep the false-positive posture the 2026-07-18 incident
-  demanded.
+  restricts NO to "nothing but" the excluded categories.** The reply is asked for **in
+  English** and parsed by first word across the supported languages' yes/no
+  vocabulary; an unreadable answer is never a YES.
+  **Extraction is windowed, over *all* windows, not just the ends**, since extraction
+  must cover every turn rather than sample the conversation — every local Ollama call
+  sends an explicit `num_ctx` (TR-951/TR-952), so a window is never silently
+  truncated. The window is 16 turns.
   Per-window results are merged, and **concept de-duplication by
   name in that merge is required for correctness**: the same concept proposed by two windows
   would be upserted twice, and the second upsert would match the row the first just wrote
@@ -257,16 +206,12 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   sitting" FR-310 rules out as evidence. Episodes are de-duplicated only on an exact
   summary/time match; differently-worded duplicates are left to `upsert_episode`'s
   embedding merge, which exists for that. A window whose answer will not parse is skipped
-  rather than failing the conversation — before windowing there was a single answer, so an
-  unparseable one meant an empty result by necessity.
+  rather than failing the conversation.
   **An unusable *item* costs only itself**, one level finer than that: well-formed JSON is
   not well-formed content, and an extracted item whose required text is missing, null,
   blank or not a string (a concept with no name or no description, an episode with no
   summary) is dropped where the answer becomes domain objects, leaving the good items
-  beside it in the same window intact. Measured at ~2% of extraction runs, and it was
-  fatal — a single null `name` raised out of the merge and discarded every window's
-  results for the conversation, defeating the per-window skip above via a field the JSON
-  decoder was perfectly happy with.
+  beside it in the same window intact.
   **A window whose prompt exceeds the context budget is skipped too, and says so**
   (TR-951): a truncated extraction call returns valid JSON with empty arrays every time,
   which is indistinguishable downstream from "nothing here", so asking it buys a lie at
@@ -274,17 +219,9 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   they warn and ask anyway, because a verdict over the surviving part of a transcript is
   degraded rather than fabricated, and skipping there would discard a long conversation
   outright, which is the failure this exists to stop.
-  **A long conversation is judged in windows, and is worthy if any window is.** This model's
-  judgment degrades with transcript *length* rather than content: one real 72-turn
-  conversation scored 0/5 whole, 5/5 on its own first 24 turns, 4/5 on its last 24, and 5/5
-  even on the 18 turns of pure STT-repair dialogue that were the least substantive material
-  in it. Judged whole, the rule was exactly backwards — the longer and richer a session, the
-  more certain it was to be discarded. Windows are taken at both ends; the middle is not
-  sampled, which is a known gap accepted against the cost of a third call to a local model
-  that serialises. Same correction as extraction's above: those numbers were measured at
-  the default 4096-token context, so what they show is the transcript overflowing the
-  window, not the judgment weakening with length — the sampling stays pending
-  re-measurement at a correct `num_ctx`, and may prove unnecessary.
+  **A long conversation is judged in windows, and is worthy if any window is.** Windows
+  are taken at both ends; the middle is not sampled, which is a known gap accepted
+  against the cost of a third call to a local model that serialises.
 - **FR-310** Concept creation from live conversation is gated independently of episode
   worthiness, by origin and engagement, not by a whole-conversation verdict. Every
   Concept carries an immutable `origin` ("authored" — bundle install, persona
@@ -296,10 +233,7 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   but a genuinely new organic insert additionally requires **provenance**: the user must
   have literally named it in at least one of their own turns, not merely been present
   for an assistant mention — topical proximity to what the assistant introduced is not
-  engagement. Provenance is a binary question, so the bar is one mention (lowered from
-  two on 2026-08-02: the higher bar was doubling as a significance proxy, which
-  double-counted filters FR-307 already applies and silently lost concepts whose
-  mentions differed only by inflection).
+  engagement. Provenance is a binary question, so the bar is one mention.
   **Significance is a separate axis on a different timescale**: an *organic* concept the
   user names again in a later conversation is promoted one engagement level, saturating
   at `INTEGRATED`. Recurrence across conversations is evidence; repetition within one is
@@ -323,26 +257,20 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   **With no memory to summarise, no brief is written at all.** Stated as a requirement
   because the failure is silent and destructive: asked with an empty context, the model
   reports that it knows nothing about the user, and saving that replaces a good brief with
-  a worse one. Until 2026-08-02 `GenerateMemoryBrief` had no memory repository whatsoever
-  and always generated from nothing — live from the first commit, and invisible to its only
-  test, which asserted on a fake LLM's canned answer instead of on the prompt it received.
-  Found by inspecting a real brief that read "Based on our conversation (which is
-  non-existent), I don't have any information about the user yet" while 63 concepts and 9
-  episodes sat unread in the database.
+  a worse one.
 - **FR-309** Whether a turn triggers a recall search at all is a persona-scoped policy
-  (a `RecallGate`), not a fixed rule — though as of 2026-07-30 every persona, the
-  language tutor included, shares the same one (`DefaultRecallGate`; the tutor's own
-  override was removed, see below): recall answers **questions**, not statements — a
-  turn must read as an actual question (a literal "?" in the STT transcript) and clear
-  a word-count floor (raised 2026-07-30 specifically to also exclude short reflexive
-  questions like "How are you?"/"What's up?", not just very short ones) to be worth
-  checking memory for at all; a plain statement, however long or substantive, never
-  triggers a search — this must be documented for the user (README/FAQ): recalling
-  something requires asking about it explicitly, not just mentioning it. The language
-  tutor no longer overrides this for its own single-word vocabulary answers (e.g. a
-  bare "agua" replying to "which word would you like to practice?"): the item
-  currently being tested is already injected via the tutor's own `PersonaSelectionPort`
-  (a separate mechanism, spaced-repetition scheduling off `persona_state`, FR-501/506),
+  (a `RecallGate`), not a fixed rule — though every persona, the language tutor
+  included, shares the same one (`DefaultRecallGate`): recall answers **questions**,
+  not statements — a turn must read as an actual question (a literal "?" in the STT
+  transcript) and clear a word-count floor (excluding both plain statements and short
+  reflexive questions like "How are you?"/"What's up?") to be worth checking memory
+  for at all; a plain statement, however long or substantive, never triggers a
+  search — this must be documented for the user (README/FAQ): recalling something
+  requires asking about it explicitly, not just mentioning it. The language tutor does
+  not override this for its own single-word vocabulary answers (e.g. a bare "agua"
+  replying to "which word would you like to practice?"): the item currently being
+  tested is already injected via the tutor's own `PersonaSelectionPort` (a separate
+  mechanism, spaced-repetition scheduling off `persona_state`, FR-501/506),
   independent of recall — a one-word answer doesn't need its own additional generic
   memory search on top of that. `RecallGate` remains a persona-scoped extension point
   (a future persona-type may still need a distinct policy), just with no active
@@ -356,17 +284,13 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   transparent about a genuine recall miss (say so) versus a turn recall never ran on at
   all (say nothing), rather than reading the same either way.
   **A returned memory must also be close enough to count** (`RecallGate.is_relevant`,
-  third decision of the gate, added 2026-08-03). `MemoryRepository.search` is nearest-N
-  with no distance floor of its own (TR-509), so against a non-empty database it always
-  returns rows however unrelated they are — which made "recall found nothing" not a
-  representable state and the honesty branch above unreachable: every recall-eligible
-  turn was told it had found relevant memories. Observed live: asked whether zodiacal
-  light had been discussed before — absent from the database, from the session, and from
-  the session tail — the reply opened "Oui, nous en avons déjà parlé". Rows below the
-  floor are dropped before composition, so honesty stops depending on the model
-  overriding a contrary instruction: the same deterministic-filter-over-plea posture as
-  FR-114 and `matches_trigger`. The floor is persona-scoped like the rest of the gate,
-  and calibrated rather than guessed — see TR-314 for the measurement and its limits.
+  the gate's third decision). `MemoryRepository.search` is nearest-N with no distance
+  floor of its own (TR-509), so against a non-empty database it always returns rows
+  however unrelated they are. Rows below the floor are dropped before composition, so
+  honesty stops depending on the model overriding a contrary instruction: the same
+  deterministic-filter-over-plea posture as FR-114 and `matches_trigger`. The floor is
+  persona-scoped like the rest of the gate, and calibrated rather than guessed — see
+  TR-314.
 
 ## FR-4xx — Offline processing & durability
 
@@ -380,15 +304,13 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
 - **FR-404** Crash safety: unprocessed session logs must be replayed into the DB on
   every client connect, so a crashed or killed server loses no conversation. Replay
   must be idempotent (already-persisted sessions skipped).
-  **Consolidation must also catch up on connect** (2026-08-02) when the quiet gap since
+  **Consolidation must also catch up on connect** when the quiet gap since
   the previous session already exceeds `idle_consolidation_minutes` — the same window the
   idle timer waits for. Without it consolidation starves: the timer starts on disconnect
   and any new connection cancels it, so sessions a few minutes apart cancel every timer
-  before it fires while replay keeps filling `conversations`. Observed in real use — 8
-  sessions in 50 minutes left 7 conversations unconsolidated and the memory brief 13 days
-  stale, so nothing said that afternoon was recallable. Catch-up runs in the background so
-  the session starts immediately; the first turns may be slower while it finishes, which
-  is the accepted cost of not silently losing long-term memory.
+  before it fires while replay keeps filling `conversations`. Catch-up runs in the
+  background so the session starts immediately; the first turns may be slower while it
+  finishes, which is the accepted cost of not silently losing long-term memory.
 - **FR-405** A consolidation failure must lose nothing: each conversation is processed
   in its own transaction; a failed conversation remains unconsolidated and is fully
   reprocessed next run.
@@ -416,15 +338,11 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   fetched (default mix: ~50% review items ranked least-known/stalest first, rest new
   items in curriculum order, interleaved by category); exactly one item is injected per
   turn until the batch is exhausted.
-- **FR-502** `[SUSPENDED 2026-08-02 — the requirement stands, its mechanism does not.`
-  A user session wish should steer selection, and the strategy side that interprets one
-  (mode review/new/mixed, a category, or a free topic ranked by similarity) is intact and
-  still reachable through `select_items(focus=…)`. What was removed is the only thing that
-  ever supplied it: the in-band `[FOCUS: …]` marker (TR-304). **No session wish reaches
-  selection today** — every persona gets its default batch. The intended replacement is
-  detecting the wish on the *user's* turn, deliberately deferred so it can be designed
-  against a second persona and tested live rather than inferred from the tutor alone;
-  see docs/BRIEF_inband_tags.md.`]
+- **FR-502** ⚠ Gap: a user session wish should steer selection (mode review/new/mixed,
+  a category, or a free topic ranked by similarity). The strategy side that interprets
+  one is intact and reachable through `select_items(focus=…)`, but **no session wish
+  reaches selection today** — every persona gets its default batch; nothing currently
+  detects the wish on the user's turn to supply it.
 - **FR-503** Where a due item relates to a stored episode (similarity above the anchor
   threshold), the injection must carry that personal anchor; otherwise at most 2 items
   per batch may carry an elicitation hint inviting a short personal story.
@@ -455,10 +373,7 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   definition** — prompt, settings, episode declaration, target languages — while leaving
   everything the user can change by voice (name, voices, speaking rate, response
   language) exactly as they have it, with a notice saying so (TR-904). A bundle carrying
-  only a `[persona]` table and no content is a valid bundle; before 2026-08-02 the format
-  required at least one lesson file, which made a persona that authors no curriculum
-  impossible to ship, and the ignore-on-exists rule would additionally have made such a
-  persona impossible to ever update.
+  only a `[persona]` table and no content is a valid bundle.
 - **FR-602** Every bundle item must install at engagement `unseen` (INV-12); merging
   into an already-engaged item keeps the earned level (FR-305).
 - **FR-603** Reinstalling the same bundle must be idempotent: unchanged items merge
@@ -496,16 +411,14 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   ("speak english", "parle français", "日本語で話して"). A match changes the
   **active persona's** `response_language` and its default voice, written to the persona
   row so it holds across sessions until another directive changes it.
-  The one-phrasing rule is load-bearing, not a simplification (2026-08-02). The directive
+  The one-phrasing rule is load-bearing, not a simplification: the directive
   utterance is also an ordinary user turn and lands at the bottom of the LLM's context, so
   a request phrased in the language being left behind pits a fresh example of that language
-  against the switch instruction in the system prompt — and llama3.1:8b was observed
-  answering the old language for a turn regardless. Asked in the target language, evidence
-  and instruction point the same way. A second phrasing in the user's current language was
-  generated until 2026-08-02 so that asking for a language you cannot yet produce would not
-  require producing it; that cost is now accepted — an unpronounceable language is reached
-  from the wizard, not by voice. Rows written by the old rule are **pruned** on startup, not
-  merely left ungenerated: a directive row outlives the configuration that produced it.
+  against the switch instruction in the system prompt, while asking in the target language
+  keeps evidence and instruction pointing the same way — an unpronounceable language is
+  reached from the wizard, not by voice. Directive rows are pruned on startup whenever
+  they no longer match the current generation rule, not merely left ungenerated: a
+  directive row outlives the configuration that produced it.
   Scope is deliberate: `User.primary_language` is **not** touched. INV-10 pins episode
   summaries to the primary language precisely so months of conversing in another language
   never rewrite the user's life story into it, and INV-14 makes a primary-language change

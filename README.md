@@ -135,8 +135,8 @@ Microphone → [VAD] → WebSocket → [STT] → [LLM stream] → [TTS] → WebS
 | Task | Model | Optionally remote? |
 |---|---|---|
 | Speech-to-text | `faster-whisper` | no |
-| Language model (live conversation) | `aya-expanse` via `ollama` (streamed) | **yes** — see [Local by default](#local-by-default) |
-| Language model (offline memory pipeline) | `aya-expanse` via `ollama` | no — always local, regardless of the above |
+| Language model (live conversation) | any Ollama-served model, picked in the setup wizard (streamed) | **yes** — see [Local by default](#local-by-default) |
+| Language model (offline memory pipeline) | same Ollama model via `ollama` | no — always local, regardless of the above |
 | Text-to-speech | `Kokoro`, GPU-accelerated when available | no |
 | Embeddings | `multilingual-e5-large` (1024-dim) | no |
 | Vector search | PostgreSQL + `pgvector` (HNSW index) | no |
@@ -197,8 +197,8 @@ anywhere.
 
 | Task | Local (default) | Optional remote |
 |---|---|---|
-| Language model — live conversation | `aya-expanse` via Ollama | any OpenAI-compatible endpoint |
-| Language model — offline memory pipeline | `aya-expanse` via Ollama | always local, no exceptions |
+| Language model — live conversation | your chosen Ollama model | any OpenAI-compatible endpoint |
+| Language model — offline memory pipeline | your chosen Ollama model | always local, no exceptions |
 | Speech-to-text, text-to-speech, embeddings, memory store | local | none ship today — the architecture's ports allow it, but the LLM is the only one actually wired up |
 
 If you do configure a remote endpoint, know what that trades away: the **LLM** sees each
