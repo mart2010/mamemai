@@ -1,0 +1,137 @@
+# Mamémai server configuration — example file (safe to commit)
+# Copy to your platform config directory and rename to mamemai.toml:
+#   Linux/macOS : ~/.config/mamemai/mamemai.toml
+#   Windows     : %LOCALAPPDATA%\mamemai\mamemai.toml
+# Or run `mamemai-setup` to generate it automatically.
+#
+# This file holds only bootstrap-before-DB-exists settings, needed to construct
+# the DB connection/services themselves. Every voice-configurable or domain-meaningful
+# setting lives in the DB instead, as an attribute of the entity that owns it
+# (User or AssistantPersona) — e.g. idle_consolidation_minutes is a User field,
+# tts_voice/speaking_rate are AssistantPersona fields. Changing any setting in this
+# file requires re-running the installation wizard.
+
+[server]
+ws_port = 8765
+log_dir = "logs/sessions"
+# Single-host deployment: the client reads this same file (same platform config path)
+# and only looks at [server].ws_port — nothing more to add. The client-only ssh_host
+# key (see client/config/mamemai.example.toml) must stay OMITTED here: its absence is
+# what tells the client that the server is local (no SSH tunnel needed).
+# Split-host deployment: the client machine gets its own mamemai.toml with ssh_host set.
+
+[database]
+# Standard libpq DSN. mamemai-setup defaults to peer auth (Linux/macOS) — no
+# password stored anywhere, since Postgres and the server always run on the
+# same machine: postgresql:///mamemai?user=mamemai (empty host = local Unix
+# socket; requires a one-time pg_ident.conf mapping, see docs/INSTALLATION.md).
+# Falls back to a password DSN below for remote Postgres or Windows (which has
+# no `peer` auth — its equivalent, `sspi`, isn't yet supported here).
+url = "postgresql://mamemai:changeme@localhost:5432/mamemai"
+
+[stt]
+# Path to a pre-downloaded faster-whisper model directory, or a model name
+# that faster-whisper will download on first run (e.g. "small", "medium").
+# Avoid large models — they compete for VRAM with the LLM and TTS.
+# mamemai-setup sets device/compute_type automatically based on whether a CUDA
+# GPU was detected. device = "cuda" or "cpu" (no other backend is supported —
+# see CLAUDE.md). compute_type = "float16" pairs with cuda; "int8" with cpu
+# (faster-whisper/CTranslate2 doesn't support float16 compute on most CPUs).
+model_path = "~/models/faster-whisper-small"
+device = "cuda"
+compute_type = "float16"
+# CPU installs only (ignored on cuda). Left unset, CTranslate2 picks its own intra-op
+# thread count — 4 on the machine this was measured on, regardless of core count. 8 is
+# the measured peak there; 16 and 24 are both *slower*, so this is deliberately not
+# nproc. Byte-identical transcripts at every value, so it only ever costs latency.
+# Retune per machine if yours differs — see TR-957.
+cpu_threads = 8
+# Shortest utterance worth transcribing, in milliseconds of buffered audio. Below this,
+# the turn is dropped with a printed "[stt] skipped ..." line and no model call.
+# This is the server-side backstop for room noise; the primary defence is the client's
+# [vad] onset_frames, and the client is separately installed, so it may be older than
+# this server or tuned for a different room. Note the client strips silence between
+# words, so this measures VOICED audio, not how long the speaker held the floor — a
+# one-word answer is only ~300 ms of it, which is why the floor sits where it does rather
+# than higher. Set to 0 to disable if you suspect it is eating real turns.
+min_utterance_ms = 300
+
+[tts]
+# device = "cuda" or "cpu", same rule as [stt].device above — mamemai-setup sets
+# this automatically. Omitting this section entirely falls back to Kokoro's
+# own torch.cuda.is_available() auto-detection, which is NOT a safe default:
+# auto-detect picks the GPU whenever torch can see one, and Kokoro is not always
+# faster there. Measured on an integrated AMD GPU (2026-08-04): an 8-sentence
+# reply takes 3.5 s on CPU and 25.7 s on the GPU — 7x SLOWER. Kokoro is an 82M
+# model dominated by sequential LSTM steps, so it is latency-bound rather than
+# throughput-bound, and a big parallel device buys it nothing. Set this
+# explicitly, and measure before assuming "cuda" is the fast answer.
+device = "cuda"
+
+[embedding]
+# device = "cuda" or "cpu"; omit to let sentence-transformers auto-detect.
+# Opposite result from [tts] above on the same hardware, which is why they are
+# separate settings: e5-large is a 560M transformer and does benefit — 71 ms ->
+# 25 ms for a single turn, 1.16 s -> 0.81 s for a batch of 64 (2026-08-04).
+# Barely visible in a live turn (one embed per turn against ~20 s of other work);
+# it matters for the offline consolidation pipeline and for bulk re-embedding.
+# device = "cuda"
+
+[llm]
+# `model`/`ollama_host` are always the local Ollama model for the offline memory
+# pipeline (consolidation, memory brief, tutor strategy helpers) regardless of
+# `provider` below (FR-707/TR-955) — a GPU-less/CPU-only offline run is fine,
+# just slower. Avoid large (~70B-class) models — they don't fit in VRAM alongside
+# Whisper + Kokoro and get cold-reloaded between turns. Avoid reasoning models
+# (e.g. qwen3) — their <think> blocks get spoken aloud.
+model = "aya-expanse"
+# ollama_host = "http://localhost:11434"  # uncomment if Ollama is not on localhost
+# Context window for every LOCAL Ollama call — live conversation and the whole offline
+# memory pipeline — needed whatever `provider` below is set to. Ollama's own default is
+# 4096 tokens and it truncates longer prompts SILENTLY: the model then answers about a
+# transcript it was never shown, extraction returns empty, and the conversation is
+# discarded from long-term memory with no error anywhere. Measured: the same 72-turn
+# conversation extracted 0 concepts at 4096 and 6 concepts + 3 episodes at 16384.
+# Raising it costs VRAM (the KV cache scales with it) and latency on full-context calls,
+# so keep it to what the workload needs rather than the model's ceiling. A prompt that
+# still exceeds it prints an "[llm] CONTEXT OVERFLOW" line instead of failing quietly.
+num_ctx = 16384
+
+# Live conversation only (the main reply + per-turn recall-intent detection) can
+# instead use a remote OpenAI-compatible endpoint — e.g. no local GPU capable of
+# fast live inference. Omit entirely (or set provider = "ollama") to keep live
+# conversation local too, using model/ollama_host above — the default, and fully
+# backward compatible with configs written before this existed.
+# provider = "openai_compatible"
+# base_url = "https://openrouter.ai/api/v1"  # any OpenAI-compatible endpoint
+# remote_model = "meta-llama/llama-3.3-70b-instruct"
+# api_key = ""  # optional — some self-hosted endpoints don't require one
+
+[languages]
+# The installed-languages contract (FR-705): the languages selected during
+# mamemai-setup, i.e. the ones whose TTS voices were actually pulled. Bounds the
+# onboarding primary-language selection and the GeneralAssistant's per-turn
+# response-language mirroring; a detected language outside this list triggers a
+# spoken reminder to re-run the wizard. Omitting the section treats every
+# supported language (SUPPORTED_LANGUAGES) as installed.
+installed = ["en", "fr", "es", "it", "pt", "ja", "zh-cn"]
+
+[memory]
+# Cosine similarity thresholds for the consolidation upsert decision (see CLAUDE.md's
+# "Upsert similarity threshold" section). Above merge_threshold: auto-merge into the
+# existing record. Between disambiguate_threshold and merge_threshold: ask the LLM
+# disambiguator. Below disambiguate_threshold: insert as a new record.
+#
+# merge_threshold was 0.93 until 2026-08-04 and that was unsafe. An auto-merge takes no
+# LLM advice and cannot be undone — two records become one — so the bar must clear
+# anything that should stay separate. Measured on a real database, the closest stored
+# pairs are all items that must NOT merge, nine of them above 0.93: 'oggi'(today) vs
+# 'adesso'(now) at 0.953, 'tre'(three) vs 'due'(two) at 0.925, 'male' vs 'bene'
+# (opposites) at 0.919. Short vocabulary items in one language score 0.92-0.96 on shared
+# register alone, so anything below ~0.96 will merge distinct words. 0.97 restricts
+# auto-merge to near-identical text and lets the disambiguator judge the rest.
+#
+# These read the similarity scale produced by the query:/passage: prefixes; changing the
+# embedding scheme means re-deriving both (see scripts/reembed_memories.py).
+merge_threshold = 0.97
+disambiguate_threshold = 0.75

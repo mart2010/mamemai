@@ -44,15 +44,20 @@ docs/_build/
 
 
 # safety nets since the real config live in %LOCALAPPDATA%\mamemai (or ~/.config/mamemai on Linux)
-server/config/
-client/config/
+# example.toml files are tracked on purpose — no secrets, just a template to copy from
+server/config/*
+!server/config/mamemai.example.toml
+client/config/*
+!client/config/mamemai.example.toml
 
 .env
 .env.local
 
-# Raw session logs (server/logs/sessions/*.jsonl) — full conversation transcripts,
-# kept forever per CLAUDE.md, must never be committed.
-server/logs/
+# Raw session logs — full conversation transcripts, kept forever per CLAUDE.md, must
+# never be committed. Written outside the repo tree, under the platform data dir
+# (log_dir in mamemai.toml, e.g. ~/.local/share/mamemai/sessions/ on Linux,
+# %LOCALAPPDATA%\mamemai\sessions on Windows) — this *.jsonl catch-all is a safety net
+# in case one ever lands inside the repo tree.
 *.jsonl
 
 # my exclusion

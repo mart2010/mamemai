@@ -1,0 +1,35 @@
+# Mamémai client configuration — example file (safe to commit)
+# Copy to your platform config directory and rename to mamemai.toml:
+#   Linux/macOS : ~/.config/mamemai/mamemai.toml
+#   Windows     : %LOCALAPPDATA%\mamemai\mamemai.toml
+# Or run `mamemai-setup --client` to generate it automatically.
+
+[server]
+ws_port = 8765
+# ssh_host = "user@your-gpu-hostname"  # omit entirely for single-host (local) deployment
+
+[vad]
+# Voice-activity tuning, all counted in 30 ms captured frames. These are per-SPEAKER and
+# per-ROOM settings, not machine tuning — the defaults are a starting point, and the
+# client prints what it decides on every utterance so they can be adjusted from real
+# numbers rather than guessed at. Omitting the whole section uses the defaults below.
+
+# Consecutive speech-classified frames needed before an utterance opens at all.
+# 3 = 90 ms, shorter than any real word. This is what stops room noise from buying a
+# whole speech-to-text pass: in one measured session, 49 of 65 utterances were noise and
+# transcribed to nothing, each paying for a full transcription. Every rejected burst
+# prints a "[vad] ignored ..." line. Raise it if noise still gets through; lower it if
+# those lines appear exactly when you start speaking.
+onset_frames = 3
+
+# Silent frames tolerated inside an utterance before it is considered finished.
+# 50 = ~1.5 s. Set this to how long YOUR thinking pauses are: too low and the turn is cut
+# off mid-sentence (at 25 / ~750 ms, a quarter of turns were), too high and every turn
+# waits that much longer before the server starts working. It is added directly to
+# response latency, so raise it only as far as your own speech actually needs.
+silence_frames = 50
+
+# Frames of audio kept and sent from *before* speech was detected. 10 = 300 ms, so the
+# transcriber hears the attack of your first word instead of a hard cut into a vowel
+# already in progress. Rarely needs changing.
+preroll_frames = 10
