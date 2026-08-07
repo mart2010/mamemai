@@ -33,7 +33,7 @@ This works in whichever language you're speaking, translated:
 | Language | "switch" |
 |---|---|
 | English | switch |
-| French | basculer |
+| French | any form of *basculer* — "bascule", "basculons", "basculer"… |
 | Spanish | cambiar |
 | Italian | passa |
 | Portuguese | mudar |

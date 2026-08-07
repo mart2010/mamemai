@@ -14,6 +14,7 @@ from mamemai_server.domain.model import (
     Turn,
     User,
 )
+from mamemai_server.services.directives import ACTION_END_SESSION, build_trigger
 from mamemai_server.services.ports import SelectedItem, SelectionPacing, SessionInfo
 from mamemai_server.services.session import EndSession, ProcessTurn, StartSession, _compose_working_context
 
@@ -741,6 +742,36 @@ class TestProcessTurn:
         injected = [
             m for m in messages
             if m.role == "system" and "Tutor" in m.content and "deactivated" in m.content
+        ]
+        assert len(injected) == 1
+
+    @pytest.mark.asyncio
+    async def test_successful_switch_injects_confirmation_context(self):
+        """Spec: FR-207 — live-tested 2026-08-07: a *successful* switch needs the same
+        turn-scoped signal a blocked one already gets, or a small local model (still
+        seeing the old persona's `recent_turns` and the unscoped memory_brief) keeps
+        the previous topic and can even claim it "can't switch", despite the switch
+        having already happened deterministically in step 3b."""
+        tutor = _tutor_persona()
+        persona_repo = FakePersonaRepository()
+        persona_repo.save(_general_assistant())
+        persona_repo.save(tutor)
+        directive_repo = FakeDirectiveRepository()
+        directive_repo.directives.append(_directive(tutor.id))
+        process_turn, _, _, llm = _make_process_turn(
+            stt_transcript="Switch to Tutor",
+            persona_repo=persona_repo,
+        )
+        use_case, _ = _make_start_session(directive_repo=directive_repo)
+        ctx = use_case.execute(session_id=uuid4(), started_at=_now())
+
+        result = await process_turn.execute(ctx, audio=b"a", now=_now())
+
+        assert result is not None and result.persona_switched is not None
+        messages, _ = llm.calls[0]
+        injected = [
+            m for m in messages
+            if m.role == "system" and "Tutor" in m.content and "already happened" in m.content
         ]
         assert len(injected) == 1
 
@@ -1552,6 +1583,65 @@ class TestLanguageDirective:
 
         messages, _ = llm.calls[0]
         assert not any("has now been done" in m.content for m in messages if m.role == "system")
+
+
+class TestEndSessionDirective:
+    """Spec: FR-115 — live-tested 2026-08-07: without a deterministic way to end the
+    session, a persona with content always queued (e.g. the cognitive persona's one
+    exercise item per turn) kept trying to work it into the reply even when the user
+    was plainly trying to say goodbye."""
+
+    def _directive(self) -> Directive:
+        return Directive(
+            id=1, target_persona_id=None, action=ACTION_END_SESSION,
+            language=Language("en"), trigger=build_trigger("bye", []),
+            description="Bye.",
+        )
+
+    @pytest.mark.asyncio
+    async def test_matched_directive_ends_the_session_and_injects_goodbye_only_context(self):
+        directive_repo = FakeDirectiveRepository()
+        directive_repo.directives.append(self._directive())
+        process_turn, _, _, llm = _make_process_turn(stt_transcript="Ok bye")
+        use_case, _ = _make_start_session(directive_repo=directive_repo)
+        ctx = use_case.execute(session_id=uuid4(), started_at=_now())
+
+        result = await process_turn.execute(ctx, audio=b"a", now=_now())
+
+        assert result is not None and result.session_ended is True
+        messages, _ = llm.calls[0]
+        assert any(
+            m.role == "system" and "ending the session" in m.content for m in messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_end_session_skips_recall_and_selection(self):
+        """The actual fix: an exercise item must not get glued onto the goodbye."""
+        strategy = FakePersonaSelectionPort(items=[SelectedItem(item=_concept("hola", 1))])
+        directive_repo = FakeDirectiveRepository()
+        directive_repo.directives.append(self._directive())
+        process_turn, memory_repo, _, _ = _make_process_turn(
+            stt_transcript="Ok bye", selection_strategies={GENERAL_ASSISTANT_ID: strategy},
+        )
+        use_case, _ = _make_start_session(directive_repo=directive_repo)
+        ctx = use_case.execute(session_id=uuid4(), started_at=_now())
+
+        await process_turn.execute(ctx, audio=b"a", now=_now())
+
+        assert strategy.calls == []
+        assert memory_repo.search_calls == []
+
+    @pytest.mark.asyncio
+    async def test_ordinary_utterance_does_not_end_the_session(self):
+        directive_repo = FakeDirectiveRepository()
+        directive_repo.directives.append(self._directive())
+        process_turn, _, _, _ = _make_process_turn(stt_transcript="What's the weather like")
+        use_case, _ = _make_start_session(directive_repo=directive_repo)
+        ctx = use_case.execute(session_id=uuid4(), started_at=_now())
+
+        result = await process_turn.execute(ctx, audio=b"a", now=_now())
+
+        assert result is not None and result.session_ended is False
 
 
 class TestAudioStreaming:

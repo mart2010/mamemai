@@ -1560,7 +1560,75 @@ turn, which points at machine-level contention.
       thing this persona will hit), divergence-flag persistence (Gap 4; the *spoken* half
       is in the prompt and pinned by a test), voice-selectable exercise type (declared
       commands), curated reasoning items (third item kind).
-      **Not yet live-verified**: never installed into the real DB, never run a voice turn.
+      **Live-verified 2026-08-07**: installed into the real `mamemai` DB (`Coach`,
+      `response_language=fr` auto-derived, `reads_across_personas=t`), server run against
+      real Postgres + real `llama3.1:8b`. First real finding: the switch trigger itself
+      was unreachable. `matches_trigger` (`services/directives.py`) is a plain
+      case-insensitive substring check, and the French keyword was the bare infinitive
+      `"basculer"` — but nobody says that; live attempts ("bascule vers mon coach", "on
+      bascule vers le coach", "qu'on bascule au coach") all used conjugated/nominal forms
+      that don't contain the substring "basculer", so none matched. (Two attempts also
+      independently exceeded `max_words=6`.) Fixed by keying French on the shared root
+      `"bascul"` instead of the full infinitive — matches every conjugation deterministically,
+      no conjugation table, same substring mechanism. `docs/PERSONAS.md`'s language table
+      updated to match. Not evaluated: whether the same bare-infinitive/conjugation gap
+      exists for es/it/pt — untested live, no evidence either way.
+      **Round 2, same evening**: with the trigger fixed, the switch fired mechanically on
+      the first correctly-worded attempt (verified in the session JSONL: `marker: break` +
+      `persona_id` flip to Coach right after "basculons vers le coach"; every later
+      "bascule…" was a correct silent no-op, target already active) — but it didn't *feel*
+      like it worked. `llama3.1:8b`, still holding this session's `recent_turns` from
+      before the switch plus the unscoped memory brief (FR-109, reaches every persona
+      regardless of `reads_across_personas`), kept GA's topic and even claimed it "can't
+      switch personas" for several turns. Fixed with a `switched_to_persona_name`
+      injection symmetric to the existing blocked-switch one (TR-315) — "this already
+      happened, own it, don't continue the old topic." Separately, Coach's one-exercise-
+      per-turn design (TR-306) kept gluing exercise questions onto farewell replies
+      ("Bye" → goodbye + "Comment compterais-tu les objets dans un panier…"), since
+      nothing in the pipeline recognized session-ending intent. Rather than heuristic
+      exit-intent detection, modeled it the same deterministic way as persona switching
+      (user's call, 2026-08-07): a third `Directive.action`, `end_session` (FR-115,
+      TR-317) — one closed-vocabulary farewell word per installed language
+      (`ensure_end_session_directive`, same idempotent/prune posture as the language
+      directives), skips recall/selection like any directive turn, injects a
+      goodbye-only instruction, and now actually closes the WebSocket connection after
+      the reply (`TurnResult.session_ended` → `server.py`'s handler breaks its loop
+      instead of continuing) — verified the client has no reconnect loop around its own
+      connection, so this really ends the session, not just that turn's content.
+      559 unit tests green (14 new across `test_session.py`/`test_directives.py`).
+      **Round 2 live-verified same evening**: all three fixes confirmed against the real
+      server/client. Switch confirmation: "Bascule vers mon coach" → Coach owns the role
+      immediately, no more "can't switch" denial; later correctly self-identified when
+      asked "Est-ce que tu es mon coach?". End-session directive: "C'est tout, au
+      revoir!" matched and produced a clean single goodbye, no glued-on exercise
+      question. Connection close: `session_closed`/`clean_exit: true` logged in the same
+      second as the goodbye reply, and `ss -tnp` confirmed no active TCP connection on
+      :8765 afterward while the server itself stayed up for the next one.
+      **Still open, unrelated to round 2**: Coach's very first reply after switching
+      still opened with the fabricated "aurores boréales" topic — the unscoped
+      `memory_brief` (FR-109) reaching every persona regardless of
+      `reads_across_personas`, flagged in round 1, not yet fixed. Also: this session's
+      exercises ran mostly on Coach's own invented content (word lists, stories) rather
+      than the user's real concepts/episodes, only switching to real-content exercises
+      once the user explicitly asked for "un exercice de mémoire" — worth checking
+      later whether `_next_selected_item`/pacing is under-serving real items each turn,
+      or whether the store is just sparse and the model fills the gap with invention;
+      not yet diagnosed.
+      **Open thread, not yet designed (2026-08-07)**: an "erase this (false) episode"
+      capability — user hit this live, repeatedly asking Coach to forget the fabricated
+      aurora-borealis episode. Coach's own bundle system prompt already anticipates the
+      shape ("do not decide which is correct... suggest they sort it out with the
+      general assistant, which can correct the record") but the model didn't follow it
+      live, just apologized and moved on — an instruction-following gap, not a missing
+      design. The harder gap: GA has no erase mechanism either yet. Unlike
+      `switch_persona`/`end_session`, "erase" can't be a pure closed-vocabulary
+      Directive — those need no interpretation, but "erase this episode" needs to
+      identify *which* one. Leading idea, undeveloped: target whatever memory item is
+      currently in the turn's working context (just recalled/discussed) rather than
+      parsing a description, keeping the trigger itself deterministic. Reassuring
+      constraint either way: only the *extracted* Episode/Concept row would be deleted —
+      the raw JSONL session log stays untouched and permanent (INV-5), so the source
+      material survives even a wrong erase, recoverable in principle by re-extraction.
 - [ ] ~~**Persona #2 — the cognitive persona**~~ (original entry) —
       [BRIEF_persona_cognitive.md](BRIEF_persona_cognitive.md), designed 2026-08-01. A
       cognitive-training persona (short frequent voice sessions: story recall, retrieval

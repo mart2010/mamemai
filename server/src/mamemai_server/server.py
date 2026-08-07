@@ -535,12 +535,13 @@ async def _handle(ws, ctx: ServerContext) -> None:
                     continue
                 audio = audio_buffer
                 audio_buffer = b""
+                result = None
                 try:
                     # TR-316: each synthesised segment is sent from inside the turn, as
                     # soon as it exists, rather than gathered and sent here once the whole
                     # reply is finished. `result.audio_chunks` is consequently empty and
                     # must not be re-sent — see TurnResult.
-                    await process_turn.execute(session, audio, datetime.now(UTC), emit_audio=ws.send)
+                    result = await process_turn.execute(session, audio, datetime.now(UTC), emit_audio=ws.send)
                 except Exception:
                     # A single turn failing (e.g. TTS error) must not take down the
                     # whole connection/server — log it and let the session continue.
@@ -550,6 +551,12 @@ async def _handle(ws, ctx: ServerContext) -> None:
                     # silent one.
                     traceback.print_exc()
                 await ws.send(json.dumps({"type": "speaking_end"}))
+                if result is not None and result.session_ended:
+                    # FR-115: this turn's reply (a plain goodbye, per the session_ending
+                    # injection) has already been sent above — closing the connection now
+                    # ends the client too (no reconnect loop, `mamemai_client.client.run`).
+                    print("Session ended by voice directive")
+                    break
 
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -693,6 +700,9 @@ def main() -> None:
     # language it asks for. Idempotent, so a language added by re-running the wizard picks
     # up its directive on next start — and one removed loses it on the same pass.
     sync.ensure_language_directives(ctx.installed_languages)
+    # "Bye"/"au revoir"/... for every installed language (FR-115). Same idempotent
+    # per-startup posture as the two calls above.
+    sync.ensure_end_session_directive(ctx.installed_languages)
 
     async def _run() -> None:
         async def handler(ws):

@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from mamemai_server.domain.model import GENERAL_ASSISTANT_ID, AssistantPersona, Directive, Language
 from mamemai_server.services.directives import (
+    ACTION_END_SESSION,
     ACTION_SET_RESPONSE_LANGUAGE,
     PersonaDirectiveSync,
     build_trigger,
@@ -207,6 +208,48 @@ class TestEnsureLanguageDirectives:
         sync.ensure_language_directives([Language("en"), Language("fr")])
         first = [(d.id, d.trigger) for d in directive_repo.list_all()]
         sync.ensure_language_directives([Language("en"), Language("fr")])
+
+        assert [(d.id, d.trigger) for d in directive_repo.list_all()] == first
+
+
+class TestEnsureEndSessionDirective:
+    def test_one_directive_per_installed_language_targets_no_persona(self):
+        """Spec: FR-115 — deterministic voice-triggered session end, one row per
+        installed language, global like set_response_language (ending the session
+        isn't a persona's call to make)."""
+        directive_repo = FakeDirectiveRepository()
+        sync = PersonaDirectiveSync(directive_repo)
+
+        sync.ensure_end_session_directive([Language("en"), Language("fr")])
+
+        directives = directive_repo.list_all()
+        assert len(directives) == 2
+        assert all(d.action == ACTION_END_SESSION for d in directives)
+        assert all(d.target_persona_id is None for d in directives)
+        by_lang = {d.language.code: d for d in directives}
+        assert matches_trigger(by_lang["en"].trigger, "Ok bye")
+        assert matches_trigger(by_lang["fr"].trigger, "Au revoir")
+
+    def test_prunes_a_language_no_longer_installed(self):
+        """Spec: FR-115, FR-705 — a language dropped from the wizard's selection loses
+        its end-session trigger too, same posture as ensure_language_directives."""
+        directive_repo = FakeDirectiveRepository()
+        sync = PersonaDirectiveSync(directive_repo)
+        sync.ensure_end_session_directive([Language("en"), Language("it")])
+
+        sync.ensure_end_session_directive([Language("en")])
+
+        directives = directive_repo.list_all()
+        assert [d.language.code for d in directives] == ["en"]
+
+    def test_idempotent_across_repeated_startups(self):
+        """Spec: FR-115 — called on every server start."""
+        directive_repo = FakeDirectiveRepository()
+        sync = PersonaDirectiveSync(directive_repo)
+
+        sync.ensure_end_session_directive([Language("en"), Language("fr")])
+        first = [(d.id, d.trigger) for d in directive_repo.list_all()]
+        sync.ensure_end_session_directive([Language("en"), Language("fr")])
 
         assert [(d.id, d.trigger) for d in directive_repo.list_all()] == first
 

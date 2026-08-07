@@ -24,7 +24,7 @@ from ..domain.model import (
     User,
     cosine_similarity,
 )
-from .directives import ACTION_SET_RESPONSE_LANGUAGE, matches_trigger
+from .directives import ACTION_END_SESSION, ACTION_SET_RESPONSE_LANGUAGE, matches_trigger
 from .ports import (
     DirectiveRepository,
     EmbeddingService,
@@ -114,6 +114,7 @@ class TurnResult:
     assistant_content: str
     persona_switched: PersonaSwitched | None = None
     conversation_boundary: ConversationBoundaryDetected | None = None
+    session_ended: bool = False
 
 
 ONBOARDING_SCRIPT = """\
@@ -358,6 +359,8 @@ def _compose_working_context(
     recall_attempted: bool = False,
     language_changed_to: Language | None = None,
     language_unavailable: str | None = None,
+    switched_to_persona_name: str | None = None,
+    session_ending: bool = False,
 ) -> tuple[str, list[Message]]:
     # No persona-listing/switch-instruction block in the persona's own system prompt
     # (FR-202/FR-203 retired, FR-207): switching is decided deterministically before
@@ -465,6 +468,28 @@ def _compose_working_context(
         )
         messages.insert(len(messages) - 1 if messages else 0, injection)
 
+    if switched_to_persona_name is not None:
+        # Symmetric to the blocked-switch injection below, for the opposite outcome
+        # (2026-08-07, live-tested): without this, the switch happens deterministically
+        # in step 3b but the reply has no signal that it did, so a small local model —
+        # still holding `recent_turns` from the old persona, plus the unscoped
+        # `memory_brief` above — keeps the old topic and can even claim it "can't
+        # switch personas", despite the switch having already succeeded and the system
+        # prompt above already being the new persona's.
+        injection = Message(
+            role="system",
+            content=(
+                f'You just switched to "{switched_to_persona_name}" — this already happened, '
+                "deterministically, before this reply; it is not something you do or decide. "
+                "This is your first reply as this persona: speak entirely as it now, per the "
+                "system prompt above, and do not continue whatever the previous persona was "
+                "discussing unless the user brings it up again. Never say you can't switch — "
+                "you just did."
+            ),
+        )
+        insert_at = len(messages) - 1 if messages else 0
+        messages.insert(insert_at, injection)
+
     if blocked_switch_persona_name is not None:
         injection = Message(
             role="system",
@@ -472,6 +497,22 @@ def _compose_working_context(
                 f'The user just asked to switch to "{blocked_switch_persona_name}", but that '
                 "persona is currently deactivated and unavailable. Briefly let them know, in "
                 "your own words, and continue the conversation normally — do not attempt to switch."
+            ),
+        )
+        insert_at = len(messages) - 1 if messages else 0
+        messages.insert(insert_at, injection)
+
+    if session_ending:
+        # FR-115, 2026-08-07: the session is ending deterministically (`ACTION_END_SESSION`
+        # already matched in step 3b) — this is why `selected_item`/recall were both
+        # skipped for this turn (`is_directive_turn`). Say so explicitly, or a persona that
+        # always has an exercise queued keeps trying to work it into the reply anyway.
+        injection = Message(
+            role="system",
+            content=(
+                "The user is ending the session now. Give a brief, natural goodbye in your "
+                "own words and nothing else — no question, no new topic, no exercise or "
+                "other content."
             ),
         )
         insert_at = len(messages) - 1 if messages else 0
@@ -699,6 +740,7 @@ class ProcessTurn:
         blocked_switch_persona_name: str | None = None
         language_changed_to: Language | None = None
         language_unavailable: str | None = None
+        session_ending = False
         # Most-keywords-wins, not first-in-list-wins: one persona's name can be a
         # strict word subset of another's (e.g. "Coach" vs "Old Coach") — an utterance
         # naming the more specific one satisfies BOTH triggers, so picking the first
@@ -725,15 +767,18 @@ class ProcessTurn:
                 # target_persona is None: a dangling reference (shouldn't happen —
                 # target_persona_id is FK-backed, INV-9) — nothing to switch to or
                 # explain, silent no-op like an already-active target.
+        elif matched_directive is not None and matched_directive.action == ACTION_END_SESSION:
+            session_ending = True
 
-        # A directive turn — a real switch or a blocked one — means this turn's own
-        # utterance was a directive/switch attempt, not a content question or
-        # something to search memory for.
+        # A directive turn — a real switch, a blocked one, a language change, or a
+        # session end — means this turn's own utterance was a directive attempt, not a
+        # content question or something to search memory for.
         is_directive_turn = (
             persona_switched is not None
             or blocked_switch_persona_name is not None
             or language_changed_to is not None
             or language_unavailable is not None
+            or session_ending
         )
 
         # 4. Recall gate → enrich working context from LTM (FR-309/TR-314). Replaces the
@@ -811,6 +856,8 @@ class ProcessTurn:
             wm, recalled_memories, selected_item,
             blocked_switch_persona_name=blocked_switch_persona_name, recall_attempted=recall_attempted,
             language_changed_to=language_changed_to, language_unavailable=language_unavailable,
+            switched_to_persona_name=wm.active_persona.name if persona_switched is not None else None,
+            session_ending=session_ending,
         )
         wm.needs_onboarding = False
         response_language = wm.active_persona.response_language
@@ -951,6 +998,7 @@ class ProcessTurn:
             assistant_content=assistant_content,
             persona_switched=persona_switched,
             conversation_boundary=boundary,
+            session_ended=session_ending,
         )
 
     async def _summarise_window(self, wm: WorkingMemory) -> None:

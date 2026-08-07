@@ -13,9 +13,15 @@ from .ports import DirectiveRepository
 # rather than producing a broken/empty trigger. Translations are a first pass, not
 # reviewed by a native speaker of each language — expect to revise once there's live
 # usage to tune against, same posture as the thresholds this replaces.
+#
+# French is a stem ("bascul"), not a full word, found 2026-08-07 live-testing the
+# cognitive persona: `matches_trigger` is a plain substring check, and nobody actually
+# says the bare infinitive "basculer" — "bascule vers...", "basculons...", "peut-on
+# basculer..." are the natural phrasings. The shared root matches all of them without
+# a conjugation table, keeping the deterministic-substring approach intact.
 _SWITCH_VERB: dict[str, str] = {
     "en": "switch",
-    "fr": "basculer",
+    "fr": "bascul",
     "es": "cambiar",
     "it": "passa",
     "pt": "mudar",
@@ -43,6 +49,20 @@ _SPEAK_VERB: dict[str, str] = {
     "ja": "話して",
     "zh-cn": "说",
 }
+# Ending the session by voice (FR-115, 2026-08-07) — deterministic, same posture as the
+# tables above, rather than leaving farewell recognition to the LLM (which had no way to
+# suppress that turn's recall/content injection; observed live, an exercise item glued
+# onto a "bye" reply). One word, not an action+name pair — this action targets no
+# persona, so there is no name to combine it with.
+_END_VERB: dict[str, str] = {
+    "en": "bye",
+    "fr": "revoir",
+    "es": "adiós",
+    "it": "arrivederci",
+    "pt": "adeus",
+    "ja": "さようなら",
+    "zh-cn": "再见",
+}
 
 # Language names, indexed [wording language][target language]. Only the diagonal is used
 # for `set_response_language` since 2026-08-02 (see `ensure_language_directives`) — the
@@ -67,6 +87,7 @@ _LANGUAGE_NAME: dict[str, dict[str, str]] = {
 
 ACTION_SWITCH_PERSONA = "switch_persona"
 ACTION_SET_RESPONSE_LANGUAGE = "set_response_language"
+ACTION_END_SESSION = "end_session"
 
 _FALLBACK_LANGUAGE_CODE = "en"
 
@@ -186,6 +207,41 @@ class PersonaDirectiveSync:
                 trigger=build_trigger(verb, name.split()),
                 description=f"{verb.capitalize()} {name}.",
                 target_language=target,
+            ))
+
+    def ensure_end_session_directive(self, installed_languages: list[Language]) -> None:
+        """Voice-triggered session end (FR-115, 2026-08-07) — one directive per
+        installed language, idempotent and pruned on every startup, same posture as
+        `ensure_language_directives`. Targets no persona (`target_persona_id=None`,
+        like `set_response_language`): ending the session isn't a persona's call to
+        make. Deterministic, replacing reliance on the LLM to notice a farewell on its
+        own — which had no way to suppress that turn's recall/content injection
+        (observed live: a cognitive-persona exercise question landed glued onto a
+        "bye" reply before this existed)."""
+        installed_codes = {lang.code for lang in installed_languages}
+        already: set[str] = set()
+        for existing in self._directive_repo.list_all():
+            if existing.action != ACTION_END_SESSION:
+                continue
+            if existing.language.code not in installed_codes:
+                if existing.id is not None:
+                    self._directive_repo.delete(existing.id)
+                continue
+            already.add(existing.language.code)
+
+        for target in installed_languages:
+            if target.code in already:
+                continue
+            verb = _END_VERB.get(target.code)
+            if verb is None:
+                continue
+            self._directive_repo.upsert(Directive(
+                id=None,
+                target_persona_id=None,
+                action=ACTION_END_SESSION,
+                language=target,
+                trigger=build_trigger(verb, []),
+                description=f"{verb.capitalize()}.",
             ))
 
     def sync_created(self, persona: AssistantPersona) -> None:

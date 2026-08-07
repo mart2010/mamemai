@@ -94,6 +94,16 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   only: stored turns and session logs stay clean (the log's `language` field carries the
   code, TR-402), and a `[lang:]` tag mimicked by the model in its response is stripped
   before TTS, never spoken.
+- **FR-115** The user must be able to end the session by voice, deterministically —
+  same mechanism as FR-207/FR-708, a third `Directive.action` (`end_session`),
+  generated for every installed language in one closed-vocabulary phrasing ("bye",
+  "au revoir", …). A match skips recall (FR-309) and persona-selected content (TR-306)
+  for that turn, same as any other directive turn, so the reply is a plain goodbye —
+  not an exercise or a search result — and the server closes the connection once that
+  reply has been sent, ending the client too (no reconnect loop). Replaces leaving
+  farewell recognition to the LLM, which had no way to suppress that turn's content
+  injection: live-tested 2026-08-07, a cognitive-persona exercise question landed
+  glued onto a "bye" reply before this existed.
 
 ## FR-2xx — Personas
 
@@ -121,8 +131,10 @@ formats, algorithms) live in [TECHNICAL.md](TECHNICAL.md).
   resolve to one voice per session — stable within the session, rotating across
   sessions (HVPT) — with no persisted state.
 - **FR-207** A **Directive** is a user utterance that changes mamemai's own operating
-  state rather than being answered in conversation. Persona switching is the first
-  (and, currently, only) directive type; a Directive is a first-class domain object
+  state rather than being answered in conversation. Persona switching was the first
+  directive type; two more share the same object and matching mechanism today —
+  `set_response_language` (FR-708) and `end_session` (FR-115). A Directive is a
+  first-class domain object
   (`domain.model.Directive`, its own `directives` table — not a `Concept`):
   `target_persona_id`, `action` (e.g. `"switch_persona"`), `language`, `trigger` (e.g.
   `{"keywords": ["switch", "tutor"], "max_words": 6}`), `description`. Matched by a

@@ -395,11 +395,12 @@ design discussion, never a patch.
   (`services/persona.py`), which updates `WorkingMemory.active_persona` and returns
   the `PersonaSwitched` event carried through to `TurnResult`. Recall (TR-314) and the
   persona-selected-item lazy fetch (TR-306) are both skipped entirely on a *directive
-  turn* — `persona_switched is not None or blocked_switch_persona_name is not None` —
-  whether the switch actually fired or was blocked, since the user's utterance was a
-  directive/switch attempt either way, not a content question; both resume normally
-  next turn. A real switch logs the assistant turn under the **new** persona id, same
-  as the retired `[PERSONA:]` scheme (TR-310) guaranteed. A blocked switch instead
+  turn* — `persona_switched is not None or blocked_switch_persona_name is not None
+  or language_changed_to is not None or language_unavailable is not None or
+  session_ending` (TR-317) — whichever directive action actually matched, since the
+  user's utterance was a directive attempt either way, not a content question; all
+  resume normally next turn. A real switch logs the assistant turn under the **new**
+  persona id, same as the retired `[PERSONA:]` scheme (TR-310) guaranteed. A blocked switch instead
   passes `blocked_switch_persona_name` to `_compose_working_context`, which inserts a
   turn-scoped `messages` entry — same injection mechanism/position as recalled
   memories/the selected item (TR-303), naming only the one persona the user already
@@ -408,6 +409,14 @@ design discussion, never a patch.
   the persona-listing block FR-202/FR-203 retired (that named every persona, every
   turn, unconditionally — this names at most one, only on the rare turn a blocked
   attempt actually occurs).
+  A **firing** (not blocked) switch passes `switched_to_persona_name` — the new
+  persona's own name — through the same injection mechanism: added 2026-08-07 after
+  live testing showed a firing switch needed the same turn-scoped signal a blocked one
+  already had. Without it, `llama3.1:8b` — still seeing this session's `recent_turns`
+  from before the switch, plus the memory brief (unscoped, reaches every persona
+  regardless of `reads_across_personas`, FR-109) — kept the old persona's topic for
+  several turns and could itself claim it "can't switch personas", despite the switch
+  having already succeeded and the system prompt already being the new persona's.
   A firing switch also unconditionally sets this turn's `boundary_marker` to
   `ConversationBoundaryType.BREAK` (step 7) — deterministic, never left to LLM judgment,
   same as the switch decision itself, and since TR-304's retirement the **only** source
@@ -436,6 +445,32 @@ design discussion, never a patch.
   A sink that raises (client gone) aborts the turn with the already-sent segments
   delivered — a truncated reply rather than a silent one; `server.py` logs it and still
   sends `speaking_end` so the mic is restored.
+
+- **TR-317** Voice-triggered session end (`ProcessTurn.execute` step 3b, FR-115): a
+  third `Directive.action`, `end_session` (`ACTION_END_SESSION`), alongside
+  `switch_persona` and `set_response_language` (TR-315, FR-708) — same object, same
+  `matches_trigger` mechanism. Trigger vocabulary is a single translated farewell word
+  per `SUPPORTED_LANGUAGE` code (`_END_VERB`, English fallback for an unlisted code) —
+  no persona-name component, since the action targets no persona
+  (`target_persona_id=None`, same as `set_response_language`).
+  `PersonaDirectiveSync.ensure_end_session_directive` generates one row per this
+  machine's installed language (FR-705), called at server startup alongside
+  `ensure_return_to_general_assistant`/`ensure_language_directives`, with the same
+  idempotent/prune-on-uninstall posture as the latter.
+  A match sets `session_ending = True`, which folds into `is_directive_turn` (TR-315) —
+  recall and the persona-selected item are both skipped, same as any other directive
+  turn — and is passed to `_compose_working_context`, which injects a turn-scoped
+  instruction: give a brief goodbye and nothing else, no question, no new topic, no
+  exercise. Without this, a persona with content always queued (the cognitive persona's
+  one exercise item per turn) kept trying to work it into the reply regardless of what
+  the user's turn actually said (observed live, 2026-08-07).
+  `TurnResult.session_ended` carries the outcome back to `server.py`'s connection
+  handler: this turn's reply is sent as usual (`speaking_end` included), then, if
+  `session_ended`, the handler breaks out of its `async for msg in ws` loop instead of
+  continuing — `websockets.serve` closes the connection once its handler coroutine
+  returns, and since `mamemai-client` (`client.py`'s `run()`) has no reconnect loop
+  around its own connection, this ends the client process too.
+
 ## TR-4xx — Session logs & replay
 
 `infrastructure/json_file.py`, `services/replay.py`.
