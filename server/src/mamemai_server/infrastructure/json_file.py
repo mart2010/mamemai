@@ -44,13 +44,13 @@ class JSONLTurnLogger:
         if persona_id is not None:
             line["persona_id"] = str(persona_id)
         with self._file_path(session_id).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(line) + "\n")
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
     def close(self, session_id: UUID, ended_at: datetime, clean_exit: bool) -> None:
         self._register(session_id, ended_at)
         line = {"type": "session_closed", "ts": ended_at.isoformat(), "clean_exit": clean_exit}
         with self._file_path(session_id).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(line) + "\n")
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
 def _session_id_from_path(path: Path) -> UUID | None:

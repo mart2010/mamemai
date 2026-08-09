@@ -303,6 +303,15 @@ literal digits inconsistently, especially outside English.
 
     def _replace(match: re.Match[str]) -> str:
         raw = match.group(0)
+        start, end = match.span()
+        before = text[start - 1] if start > 0 else ""
+        after = text[end] if end < len(text) else ""
+        if before.isalpha() or after.isalpha():
+            # A digit run glued to a letter (Kepler-62f, F-16, 1st) is an identifier, not
+            # a quantity: spelling out just the digits splices words against the letter
+            # with no separator (e.g. "soixante-deuxf"). Leave the whole token to the TTS
+            # engine, same as CJK's own digit handling.
+            return raw
         if match.lastgroup == "grouped":
             for ch in thousands:
                 raw = raw.replace(ch, "")
