@@ -49,10 +49,13 @@ silently work around:
 
 ## Session start
 
-If `docs/PLAN.md` exists, read it first — project status and open work. Update its task
-markers (`[ ]`/`[~]`/`[x]`) as work progresses. The phase-by-phase history (findings,
-verification records) is archived in `docs/archive/PLAN_phases_1-13.md`; the spec is
-the present tense.
+Read `docs/PLAN.md` first — a short status summary plus an index of open work. Each
+row points at a `docs/changes/<slug>/` folder (`proposal.md` for the problem,
+`tasks.md` for the checklist and findings — see `docs/changes/README.md`); update task
+markers (`[ ]`/`[~]`/`[x]`) there as work progresses, not in PLAN.md itself.
+`docs/BACKLOG.md` holds items not yet promoted to a change. Historical narrative is
+archived in `docs/archive/PLAN_phases_1-13.md` and
+`docs/archive/PLAN_2026-07-16_to_2026-08-08.md`; the spec is the present tense.
 
 ## Environment & running
 

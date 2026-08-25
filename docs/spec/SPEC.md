@@ -124,13 +124,22 @@ when narrative tends to have piled up (rule 5 above) — sweep it out to
 - **CLAUDE.md** keeps session working rules (toolchain, testing style, hard reminders)
   and points here for all behavioural/architectural facts. Where the two disagree, the
   spec wins — and the disagreement is a bug to fix immediately.
-- **docs/PLAN.md** tracks the still-open work; the historical phase log (what was
-  built when, findings) is frozen in **docs/archive/PLAN_phases_1-13.md** — references
-  elsewhere to "PLAN.md Phase N" resolve there. The spec is the present tense; the
-  plan history is the past tense.
+- **docs/PLAN.md** is a short status summary plus an index of what's currently open;
+  the work itself lives one level down.
+- **docs/changes/** holds one folder per in-flight change (`proposal.md`/`design.md`/
+  `tasks.md`) — see `docs/changes/README.md`. This is where findings, measurements and
+  the checklist for open work accumulate; a change updates the spec (this alignment
+  loop) as part of resolving, then the whole folder is archived verbatim.
+- **docs/BACKLOG.md** holds items not yet promoted to a change: not-yet-designed
+  features, known leftovers, calibration constants waiting on real usage data, and
+  accepted limitations.
+- Historical phase logs (what was built when, findings) are frozen in
+  **docs/archive/PLAN_phases_1-13.md** and **docs/archive/PLAN_2026-07-16_to_2026-08-08.md**
+  — references elsewhere to "PLAN.md Phase N" resolve in the first. The spec is the
+  present tense; all of the above is the past or the in-flight tense.
 - **docs/BRIEF_*.md** (and `docs/archive/`) record design rationale — the *why* behind
-  requirements. The spec states the *what*; a requirement may point at a brief for
-  rationale but must stand alone.
+  requirements. The spec states the *what*; a requirement may point at a brief (or a
+  change's `design.md`) for rationale but must stand alone.
 - **docs/archive/spec/** holds narrative trimmed from live requirements (rule 5
   above) — dated measurements and incident write-ups that explained a past change,
   not current behaviour. `docs/spec/` is always the present tense; this is its past

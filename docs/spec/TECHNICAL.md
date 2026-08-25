@@ -157,7 +157,8 @@ design discussion, never a patch.
   The onset gate exists because a *single* noise-classified frame can otherwise arm a
   whole turn, burning a full STT pass on room noise re-triggering the mic the moment
   TR-205 restores it after playback. Whether intra-utterance silence should also be
-  sent (so Whisper sees natural audio) is open — see docs/PLAN.md.
+  sent (so Whisper sees natural audio) is open — see
+  docs/changes/TR-957-vad-benchmark-remeasure/.
 - **TR-204** End-of-utterance: after speech has been active, **> `silence_frames`
   consecutive silent frames** (default 50, ~1.5 s) sends `end_utterance` and resets.
   Silence before any speech sends nothing.
