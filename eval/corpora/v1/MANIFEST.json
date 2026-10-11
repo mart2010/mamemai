@@ -1,0 +1,30 @@
+{
+ "version": "v1",
+ "digest": "3b0fbff76f681f6adeccef46f39b4a72fe396c69650ffa877d47f49ccc79bdfa",
+ "created_at": "2026-10-11T16:07:58.212046+00:00",
+ "generated_with": "claude-sonnet-5-5",
+ "profile_ids": [
+  "67a4900a-6968-5060-8418-573f2eb56fc2",
+  "7b32dfd6-f141-5a23-adf7-7c282762d925",
+  "b92ac40d-d7ee-553e-8d9e-4add19250f18",
+  "e7acefb7-f15e-5f03-bee3-72b741b733c0"
+ ],
+ "counts": {
+  "profiles": 4,
+  "facts": 240,
+  "probes": 291,
+  "probes.single_fact": 112,
+  "probes.aggregation": 16,
+  "probes.update": 19,
+  "probes.abstention": 32,
+  "probes.cross_lingual": 56,
+  "probes.hard_negative": 56
+ },
+ "notes": "Initial corpus: 4 profiles (fr/en x hesitant/fluent), generated 2026-10-11 with claude-sonnet-5-5; user read the fr ledgers and skimmed the en ones; probes generated but not individually reviewed",
+ "files": [
+  "profiles.jsonl",
+  "ledger_facts.jsonl",
+  "scenario_dates.jsonl",
+  "probes.jsonl"
+ ]
+}

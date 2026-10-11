@@ -57,6 +57,14 @@ markers (`[ ]`/`[~]`/`[x]`) there as work progresses, not in PLAN.md itself.
 archived in `docs/archive/PLAN_phases_1-13.md` and
 `docs/archive/PLAN_2026-07-16_to_2026-08-08.md`; the spec is the present tense.
 
+## Evaluation harness (`eval/`)
+
+Benchmarks and quality gates for the whole app live in `eval/`, with its own docs
+([PLAN](eval/docs/PLAN.md), [DESIGN](eval/docs/DESIGN.md), [GLOSSARY](eval/docs/GLOSSARY.md)).
+**One-way dependency (EV-INV-1):** `eval/` may import `mamemai_server`; nothing in
+`server/`, `client/` or `setup/` may ever import `eval/`. Read `eval/docs/PLAN.md` first
+when working there.
+
 ## Environment & running
 
 Python 3.13+; each package has its own venv. **uv only** — never pip (see incubator

@@ -1,0 +1,40 @@
+[project]
+name = "mamemai-eval"
+version = "0.1.0"
+description = "Mamémai evaluation harness — benchmarks, quality gates, calibration"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+# The System Under Test. Heavy (torch, kokoro, whisper …) and reached only through
+# adapters/server_bridge — see docs/DESIGN.md (EV-INV-1). Not needed for slice 0.
+sut = ["mamemai-server"]
+
+[project.scripts]
+mamemai-eval = "mamemai_eval.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["uv_build>=0.11.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[tool.uv.sources]
+mamemai-server = { path = "../server" }

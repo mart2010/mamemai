@@ -66,3 +66,7 @@ xprivate/
 # Claude Code local files — machine-specific (host names, local paths). Never commit.
 .claude/settings.local.json
 .claude/machine-aliases.local.json
+eval/drafts/
+
+# Frozen evaluation corpora are source data, unlike session logs (*.jsonl above)
+!eval/corpora/**/*.jsonl

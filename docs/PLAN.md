@@ -48,6 +48,8 @@ statement and `tasks.md` for the checklist and findings.
 | [persona-cognitive-remaining-gaps](changes/persona-cognitive-remaining-gaps/proposal.md) | in progress | [BRIEF_persona_cognitive.md](BRIEF_persona_cognitive.md) |
 | [persona-contract-sequencing](changes/persona-contract-sequencing/proposal.md) | open | [BRIEF_persona_contract.md](BRIEF_persona_contract.md) |
 | [live-smoke-verification](changes/live-smoke-verification/proposal.md) | open — manual checklist, not yet run | Phase 12/13 |
+| [memory-brief-rebuild](changes/memory-brief-rebuild/proposal.md) | open — measure first (eval baseline), then fix | FR-109, FR-308 |
+| [eval/](../eval/docs/PLAN.md) | in progress — design agreed 2026-10-11; slice 0 done, slice 1 next | [eval/docs/DESIGN.md](../eval/docs/DESIGN.md) (own plan, glossary, EV-INV invariants) |
 
 See [docs/BACKLOG.md](BACKLOG.md) for not-yet-designed features, known leftovers,
 calibration constants waiting on real usage data, and accepted limitations — items there

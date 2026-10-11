@@ -6,6 +6,8 @@ Terms are grouped in three tiers. Within Mamemai documents, code, tests, and
 conversation, these terms are used **exactly as defined here** — if a term feels
 imprecise during design work, fix it here first, then everywhere else.
 
+*Evaluation-harness vocabulary (Scenario, Ground Truth Ledger, Probe, Suite, Run, …) lives in [eval/docs/GLOSSARY.md](../../eval/docs/GLOSSARY.md); it never redefines a term below.*
+
 Conventions: `code style` marks identifiers that appear verbatim in the codebase.
 Cross-references are *italicised*.
 
