@@ -101,3 +101,58 @@ class FakeEvalRepository:
 
     def list_runs(self, suite: str) -> list[Run]:
         return sorted((r for r in self._runs.values() if r.suite == suite), key=lambda r: r.started_at, reverse=True)
+
+
+class FakeRetrievalSut:
+    """In-memory `RetrievalSut`: similarity = word-set Jaccard, enough to give a deterministic ranking.
+    Like the real store it is *nearest, not near* (TR-509): any non-empty store answers every query."""
+
+    def __init__(self, cutoff: float = 0.84) -> None:
+        self.cutoff = cutoff
+        self.records: list = []
+        self.closed = False
+
+    def __enter__(self) -> "FakeRetrievalSut":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.closed = True
+
+    def describe(self):
+        from mamemai_eval.usecases.retrieval import SutDescription
+        return SutDescription({"embedding": "fake-jaccard"}, self.cutoff)
+
+    def index(self, records) -> None:
+        self.records.extend(records)
+
+    def embed_passages(self, records):
+        """Hashed bag-of-words vectors: texts sharing words are close, deterministic across runs."""
+        import hashlib
+        out = []
+        for r in records:
+            text = f"{r.name}: {r.text}" if r.name and r.name_in_embedding else r.text
+            vec = [0.0] * 64
+            for w in text.casefold().replace(".", " ").replace(",", " ").split():
+                vec[int(hashlib.md5(w.encode()).hexdigest(), 16) % 64] += 1.0
+            out.append(vec)
+        return out
+
+    def plan(self, path):
+        return "Seq Scan" if path == "exact" else "Index Scan fake"
+
+    def search(self, queries, top_n, path="planner", ef_search=None):
+        from mamemai_eval.domain.retrieval import Hit
+
+        def words(s: str) -> set[str]:
+            return {w.strip(".,?!'’").casefold() for w in s.split() if w}
+
+        out = []
+        for q in queries:
+            qw = words(q.text)
+            scored = []
+            for r in self.records:
+                rw = words(f"{r.name}: {r.text}" if r.name else r.text)
+                scored.append((len(qw & rw) / len(qw | rw), r.fact_id))
+            scored.sort(key=lambda t: (-t[0], t[1]))
+            out.append([Hit(fid, sim) for sim, fid in scored[:top_n]])
+        return out

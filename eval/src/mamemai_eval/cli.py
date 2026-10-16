@@ -48,6 +48,25 @@ def main(argv: list[str] | None = None) -> int:
     imp = cor.add_parser("import", help="rebuild a Corpus from an exported directory (another machine / wiped DB)")
     imp.add_argument("directory", type=Path)
     cor.add_parser("list", help="list frozen Corpora")
+    run = sub.add_parser("run", help="execute a Suite against the System Under Test").add_subparsers(
+        dest="run_cmd", required=True)
+    rr = run.add_parser("retrieval", help="semantic search over a frozen Corpus (real embedding + pgvector)")
+    rr.add_argument("--corpus", required=True, help="frozen Corpus version, e.g. v1")
+    rr.add_argument("--language", choices=["en", "fr"], help="default: both, as separate Runs")
+    rr.add_argument("--repeat", type=int, default=1, help="repeat N times to measure the Noise Floor")
+    rr.add_argument("--keep-scratch", action="store_true", help="keep the Scratch Schema (debugging)")
+    rr.add_argument("--device", help="embedding device (cpu/cuda); default: the server's auto-detection")
+    sw = sub.add_parser("sweep", help="Threshold Sweep: re-score similarities under other cut-offs / thresholds").add_subparsers(
+        dest="sweep_cmd", required=True)
+    sr = sw.add_parser("retrieval", help="recall cut-off (FR-309) and merge/disambiguate thresholds (TR-602)")
+    sr.add_argument("--corpus", required=True)
+    sr.add_argument("--language", choices=["en", "fr"])
+    sr.add_argument("--renderings", default="first-key-term,bare",
+                    help="concept-naming rules to compare (sensitivity check): first-key-term, bare")
+    sr.add_argument("--device")
+    ra = run.add_parser("ann", help="HNSW index vs exact scan (S1.8), with an ef_search=1 positive control")
+    ra.add_argument("--corpus", required=True)
+    ra.add_argument("--device")
     args = parser.parse_args(argv)
 
     if args.cmd == "db" and args.db_cmd == "migrate":
@@ -59,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
         return _generate_ledger(EvalLanguage(args.language), SpeechArchetype(args.archetype), args.force, args.seed)
     if args.cmd == "corpus":
         return _corpus(args)
+    if args.cmd == "run" and args.run_cmd == "ann":
+        return _run_ann(args)
+    if args.cmd == "run":
+        return _run_retrieval(args)
+    if args.cmd == "sweep":
+        return _sweep_retrieval(args)
     if args.cmd == "generate" and args.gen_cmd == "probes":
         return _generate_probes(args.language, args.archetype, args.seed)
     return 2
@@ -86,6 +111,132 @@ def _corpus(args: argparse.Namespace) -> int:
         except (CorpusError, FileExistsError) as e:
             print(f"failed: {e}")
             return 1
+    return 0
+
+
+def _run_retrieval(args: argparse.Namespace) -> int:
+    from .adapters.server_bridge import ServerBridgeRetrievalSut, SutWorkerError
+    from .usecases.retrieval import ExecuteRetrievalSuite
+    from .usecases.report import format_noise_floor, format_run
+
+    with pg.connect() as conn:
+        repo = pg.PgEvalRepository(conn)
+        if not verify(repo, args.corpus):
+            print(f"corpus {args.corpus} is missing or does not match its digest (EV-INV-5); not running")
+            return 1
+        corpus = repo.get_corpus(args.corpus)
+        by_language: dict[EvalLanguage, list] = {}
+        for pid in corpus.profile_ids:
+            profile = repo.get_profile(pid)
+            by_language.setdefault(profile.language, []).append((profile, repo.get_ledger(pid), repo.get_probes(pid)))
+        suite = ExecuteRetrievalSuite(lambda: ServerBridgeRetrievalSut(device=args.device, keep_scratch=args.keep_scratch))
+        for language, profiles in sorted(by_language.items()):
+            if args.language and language.value != args.language:
+                continue
+            runs = []
+            for i in range(args.repeat):
+                try:
+                    run, _ = suite.run(language=language, corpus_version=args.corpus, profiles=profiles)
+                except SutWorkerError as e:
+                    print(f"{language.value}: SUT failed: {e}")
+                    return 5
+                repo.save_run(run)
+                runs.append(run)
+                print(format_run(run, repeat=f"{i + 1}/{args.repeat}"))
+            if len(runs) > 1:
+                print(format_noise_floor(runs))
+    return 0
+
+
+def _run_ann(args: argparse.Namespace) -> int:
+    from .adapters.server_bridge import ServerBridgeRetrievalSut, SutWorkerError
+    from .usecases.ann_check import MeasureAnnRecall
+    from .usecases.report import format_run
+
+    with pg.connect() as conn:
+        repo = pg.PgEvalRepository(conn)
+        if not verify(repo, args.corpus):
+            print(f"corpus {args.corpus} is missing or does not match its digest (EV-INV-5); not running")
+            return 1
+        by_language: dict[EvalLanguage, list] = {}
+        for pid in repo.get_corpus(args.corpus).profile_ids:
+            profile = repo.get_profile(pid)
+            by_language.setdefault(profile.language, []).append((profile, repo.get_ledger(pid), repo.get_probes(pid)))
+        check = MeasureAnnRecall(lambda: ServerBridgeRetrievalSut(device=args.device))
+        for language, profiles in sorted(by_language.items()):
+            for ef in (None, 1):  # default index setting, then the positive control
+                try:
+                    run = check.execute(profiles, args.corpus, ef_search=ef)
+                except (SutWorkerError, RuntimeError) as e:
+                    print(f"{language.value}: failed: {e}")
+                    return 5
+                repo.save_run(run)
+                print(format_run(run, repeat="(control)" if ef else ""))
+    return 0
+
+
+# TR-602 defaults, repeated here because eval/ reaches the server only through the SUT worker; the recall
+# cut-off itself is read from the SUT (SutDescription.min_recall_similarity).
+PRODUCTION_MERGE, PRODUCTION_DISAMBIGUATE = 0.93, 0.75
+_RENDERING_NAMES = {"first-key-term": "FIRST_KEY_TERM", "bare": "BARE"}
+
+
+def _sweep_retrieval(args: argparse.Namespace) -> int:
+    from .adapters.server_bridge import ServerBridgeRetrievalSut, SutWorkerError
+    from .domain.sweep import frange, lowest_safe_cutoff, lowest_safe_merge, sweep_cutoffs, sweep_thresholds
+    from .usecases.report import (
+        format_cutoff_sweep, format_pair_distributions, format_threshold_sweep)
+    from .usecases.retrieval import ExecuteRetrievalSuite, Rendering
+    from .usecases.sweep import MeasurePairSimilarities
+
+    try:
+        renderings = [Rendering[_RENDERING_NAMES[r.strip()]] for r in args.renderings.split(",")]
+    except KeyError as e:
+        print(f"unknown rendering {e}; choose from {sorted(_RENDERING_NAMES)}")
+        return 2
+    factory = lambda: ServerBridgeRetrievalSut(device=args.device)  # noqa: E731
+    report: list[str] = [f"# Threshold Sweep — retrieval, corpus {args.corpus}", ""]
+    with pg.connect() as conn:
+        repo = pg.PgEvalRepository(conn)
+        if not verify(repo, args.corpus):
+            print(f"corpus {args.corpus} is missing or does not match its digest (EV-INV-5); not running")
+            return 1
+        by_language: dict[EvalLanguage, list] = {}
+        for pid in repo.get_corpus(args.corpus).profile_ids:
+            profile = repo.get_profile(pid)
+            by_language.setdefault(profile.language, []).append((profile, repo.get_ledger(pid), repo.get_probes(pid)))
+        for language, profiles in sorted(by_language.items()):
+            if args.language and language.value != args.language:
+                continue
+            for rendering in renderings:
+                header = f"## {language.value} · {rendering.value}"
+                print(f"\n{header}")
+                try:
+                    run, outcomes = ExecuteRetrievalSuite(factory).run(
+                        language=language, corpus_version=args.corpus, profiles=profiles, rendering=rendering)
+                    pairs = [p for profile, ledger, _ in profiles
+                             for p in MeasurePairSimilarities(factory).execute(profile, ledger, rendering)]
+                except SutWorkerError as e:
+                    print(f"SUT failed: {e}")
+                    return 5
+                repo.save_run(run)
+                production = float(run.fingerprint.extra["cutoff"])
+                results = [r for o in outcomes for r in o.results]
+                grid = sorted({*frange(0.60, 0.96, 0.02), production})
+                safe = lowest_safe_cutoff(results)
+                cutoff_txt = format_cutoff_sweep(sweep_cutoffs(results, grid), safe, production)
+                dist_txt = format_pair_distributions(pairs)
+                thr = sweep_thresholds(pairs, [PRODUCTION_MERGE], frange(0.60, 0.90, 0.05)) + sweep_thresholds(
+                    pairs, frange(0.85, 0.99, 0.02), [PRODUCTION_DISAMBIGUATE])
+                thr_txt = format_threshold_sweep(thr, lowest_safe_merge(pairs), (PRODUCTION_MERGE, PRODUCTION_DISAMBIGUATE))
+                block = [header, "", "```", f"run {run.run_id}  git {run.fingerprint.git_sha}  sut {dict(run.fingerprint.sut)}", "",
+                         "recall cut-off", cutoff_txt, "", "pair similarities (passage↔passage, TR-601)", dist_txt, "",
+                         "merge / disambiguate thresholds (TR-602)", thr_txt, "```", ""]
+                print("\n".join(block[2:-2]))
+                report += block
+    out = Path(__file__).resolve().parents[2] / "results" / f"sweep_retrieval_{args.corpus}.md"
+    out.write_text("\n".join(report), encoding="utf-8")
+    print(f"\nreport written to {out}")
     return 0
 
 

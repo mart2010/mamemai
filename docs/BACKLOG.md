@@ -79,6 +79,12 @@ accumulate:
 - [ ] Merge/disambiguate upsert thresholds (0.93 / 0.75) — the hypernym vs.
       same-name-different-domain cases sit uncomfortably close (0.86–0.87); real
       embedding-calibration numbers are in the archived Phase 3 notes.
+      *Eval evidence 2026-10-16* (corpus v1, 60-item stores, so indicative only —
+      [eval/results/sweep_retrieval_v1.md](../eval/results/sweep_retrieval_v1.md), verdicts in
+      [eval/docs/PLAN.md](../eval/docs/PLAN.md)): merge 0.93 fuses ≈ 0.2 % of distinct pairs, no
+      distinct pair is fused from ≈ 0.95; disambiguate 0.75 sits below ≥ 95 % of distinct pairs
+      (always asks the LLM). Recall floor 0.84 is ≈ 0.05 above the abstention-safe point
+      (0.79 en / 0.81 fr) — see `changes/FR-309-language-recall-floor`. No constant changed.
 - [ ] Tutor retention ranking + half-life parameters — assessment writes
       `persona_state` from day one; selection keeps ranking by `engagement_level`
       until data justifies flipping `settings["ranking"] = "retention"`.
@@ -105,6 +111,14 @@ accumulate:
       installed languages — glossary already marks it "removal pending").
 
 ---
+
+- [ ] **Embedding truncation at 512 tokens** (found 2026-10-16 while answering a question): e5-large's
+      `max_seq_length` is 512 and longer input is silently truncated. Concept descriptions are specified at
+      ~300 words, which in French/Italian can approach that bound; the tail would not influence search.
+      Unmeasured — check the token length of stored descriptions (`eval/` can do it on extracted concepts at S2.5).
+- [ ] **Filtered HNSW search** (eval S1.8, 2026-10-16): the concept search filters `persona_id` after the index
+      returns `ef_search` (40) candidates; a persona with few concepts next to a large one may get fewer than
+      `top_n` rows. Not measured (needs a multi-persona store); see `eval/docs/PLAN.md` S1.8 findings.
 
 ## Known gaps / accepted limitations (revisit when relevant)
 

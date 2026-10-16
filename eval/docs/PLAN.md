@@ -41,10 +41,11 @@
 - [x] S1.2 (**done: four ledgers, frozen in Corpus v1**) `GenerateProfileAndLedger`: per language one `hesitant` + one `fluent` Profile (60 facts each), schema validation + consistency checks *(D5)*
 - [x] S1.3 `GenerateProbes` from Ledger: paraphrase, cross-lingual, hard-negative, abstention (+ update, aggregation) — 291 probes
 - [x] S1.4 Review pass → `FreezeCorpus` v1 (en, fr) + JSONL export *(D4)* — frozen 2026-10-11, digest `3b0fbff76f68`
-- [ ] S1.5 `retrieval` Suite: build memory items from Ledger in a Scratch Schema via the real embedding + repository; metrics recall@k / MRR / nDCG / abstention
-- [ ] S1.6 Baseline Run: current embedding model (e5), en and fr; measure Noise Floor (N repeats; mostly deterministic, confirm)
-- [ ] S1.7 Threshold Sweep for merge/disambiguate/recall cut-offs → feeds BACKLOG "Calibration" items (Verdicts recorded there)
-- [ ] S1.8 ANN-vs-exact recall check (HNSW vs exact scan)
+- [x] S1.5 `retrieval` Suite: build memory items from Ledger in a Scratch Schema via the real embedding + repository; metrics recall@k / MRR / nDCG / abstention
+- [x] S1.6 Baseline Run: current embedding model (e5), en and fr; measure Noise Floor (N repeats; mostly deterministic, confirm)
+- [x] S1.7 Threshold Sweep for merge/disambiguate/recall cut-offs → feeds BACKLOG "Calibration" items (Verdicts recorded there)
+  - **Sensitivity check (agreed 2026-10-16):** repeat the sweep under a second concept-naming rule (e.g. sentence only, no name) and report whether the Verdicts move; if they do, escalate to Reference-LLM-written names. Optional extra rendering variant: SPO triple text (see findings 2026-10-16, storage-form question)
+- [x] S1.8 ANN-vs-exact recall check (HNSW vs exact scan)
 - [ ] S1.9 `compare` and report (table + deltas), `export` of Run summaries
 
 ## Slice 2 — Consolidation suite
@@ -200,3 +201,105 @@ Review files (gitignored): `eval/drafts/probes_<lang>_<archetype>.md`. 29 Refere
   files on another machine / wiped DB after checking the digest (both tested; integration tests show export → empty DB → import
   gives an identical, verified corpus). `corpus list` lists versions.
 - Canonical form: four JSONL files, rows and keys sorted, UTF-8; digest = sha256 over names + bytes. 94 tests green.
+
+**2026-10-16 — S1.5 + S1.6: `retrieval` Suite built, baseline measured.** `mamemai-eval run retrieval --corpus v1
+[--language L] [--repeat N] [--keep-scratch] [--device D]`; 102 tests green (7 unit with `FakeRetrievalSut`, 1 integration
+against the real model). Design as agreed: `domain/retrieval.py` (metrics + `score_retrieval`, pure), `usecases/retrieval.py`
+(`RetrievalSut` port, `ExecuteRetrievalSuite`), `adapters/server_bridge.py` (client) + `adapters/sut_worker.py` (runs under
+`server/.venv`, the only file importing `mamemai_server`; JSON lines on stdio, fd 1 re-pointed at stderr so library output
+cannot corrupt the protocol). One Scratch Schema per Profile; one Run per language (both archetypes pooled). Per-Probe
+`Hit`s are kept in `RetrievalOutcome` so the S1.7 sweep can re-score without re-embedding. Runs are saved to `eval.run`.
+- **Baseline (Run per language, corpus v1, e5-large on CPU, HNSW cosine, cut-off 0.84, git `0aa7cd5`+dirty):**
+
+  | | en (n=128) | fr (n=131) |
+  |---|---|---|
+  | recall@1 / @5 / @10 | 0.900 / 0.984 / 1.000 | 0.919 / 0.993 / 0.995 |
+  | MRR / nDCG@10 | 0.962 / 0.968 | 0.972 / 0.974 |
+  | **gated_recall@5** (survives the 0.84 floor) | **0.438** | **0.626** |
+  | abstention_correct (n=16 each) / mean top-1 sim | 1.000 / 0.762 | 1.000 / 0.790 |
+  | update_current_first (n=8 / 11) | 0.500 | 0.636 |
+  | aggregation recall@5 (n=8 each) | 0.750 | 0.885 |
+  | single_fact, cross_lingual, hard_negative recall@1 | ≈ 1.0 (ceiling) | ≈ 1.0 (ceiling) |
+
+- **Noise Floor = 0.** Three repeats per language gave bit-identical Scores: retrieval is deterministic (embedding on CPU +
+  HNSW with a fixed insert order). Any difference between two Runs of this Suite is therefore real, not noise — until the
+  device changes (CPU vs GPU embeddings differ in the last digits; `embedding_device` is in the fingerprint).
+- **Finding 1 — the 0.84 floor discards most correct answers on this corpus** (gated recall 44 % en / 63 % fr) while
+  abstention is already perfect (every unanswerable probe tops out below 0.84, mean 0.76–0.79). So on this data the floor looks
+  stricter than needed for honesty, and stricter for English than French, the "per-language band" limit TR-314 already
+  records. Caveat before acting: stores here hold 60 items, the live store holds thousands, and the Ledger texts are
+  template-like. **S1.7's sweep is where this becomes a Verdict**; nothing is to be changed in the product before it.
+- **Finding 2 — the corpus is too easy to discriminate on single_fact / cross_lingual / hard_negative** (≈ 1.0, with 60-item
+  stores). They remain valid regression guards, but model comparisons will be decided by gated recall, aggregation, update and
+  the similarity distributions. A larger or noisier store (distractor items from the other three Profiles, or a v2 corpus) is the
+  lever if an embedding comparison needs more resolution — an S1.7 decision, not made here.
+- **Finding 3 — update Probes retrieve the stale fact first about half the time** (en 0.50, fr 0.64): the old and new value
+  embed almost identically. Retrieval alone cannot fix this; it is the case consolidation's Fact Revision handling (S2.5) must
+  cover, and one the memory-brief rebuild already cares about.
+- **Measurement choices to keep in mind:** concept names are `key_terms[0]` (the Ledger has no names; recorded in the
+  fingerprint as `rendering=concept-name=first-key-term`) — a different naming rule is a new comparability line;
+  `attribute` facts are stored as concepts, as the PLAN already says, without a product decision behind it; the worker
+  searches episodes + concepts only (procedures are never extracted live, FR-307).
+- **Environment:** the server venv's torch is a CUDA build (`2.12.0+cu130`, `cuda.is_available() == False`) on this AMD
+  machine, so embeddings ran on CPU (~16 s model load + index for 120 items, ~30 s per language-Run; GPU not needed for this
+  Suite). I did not touch the server venv (a ROCm torch reinstall is the memory's known `uv sync` trap).
+- Bug caught on first live run, now covered by the integration test: `PSMemoryRepository.search` already returns
+  similarity (`1 − distance`); the worker had converted a second time and every ranking came back reversed.
+
+**2026-10-16 — S1.7 scope extended; storage-form question raised.** The user kept `concept-name=first-key-term` for the baseline
+and asked for a naming-sensitivity check inside S1.7 (added above). The user also asked whether personal facts should be stored as
+subject–predicate–object triples instead of reusing the Concept model, which was designed for larger knowledge items. Not decided;
+the Suite's rendering axis (`RENDERING` in the fingerprint) is where a triple variant would be measured first, on identical Ledgers.
+
+**2026-10-16 — S1.7 done: Threshold Sweep + naming sensitivity.** `mamemai-eval sweep retrieval --corpus v1 [--language] [--renderings
+first-key-term,bare]` (≈ 4.5 min on CPU for 2 languages × 2 renderings); full tables in `eval/results/sweep_retrieval_v1.md`
+(tracked). It re-scores stored similarities: recall cut-off over the Probe outcomes, and merge/disambiguate over labelled
+passage↔passage pairs (SAME = fact vs. its 2 paraphrases, 480/language; REVISION = old↔new, 8 en / 11 fr; DISTINCT = every other
+pair of the same memory type, ≈ 1800/language). 108 tests green. **Nothing in the product was changed**; these are Verdicts for the
+spec loop, with the caveats below.
+- **Verdict 1 — recall floor (0.84, FR-309/TR-314).** The lowest cut-off that still refuses every unanswerable probe is
+  **0.787 en / 0.811 fr** (naming rule A) and 0.781 / 0.807 (rule B). At 0.84 gated recall is 44 % / 63 %; at the safe point it is
+  96 % / 83 %. So on this corpus 0.84 is ≈ 0.05 stricter than abstention safety requires, more so for English — the
+  per-language-band limit TR-314 already documents, now with numbers. A language-aware floor of about 0.80 (en) / 0.82 (fr), i.e. safe
+  cut-off + margin, would recover most answers. Evidence weak in two ways: only 16 abstention probes per language (the "safe" point
+  is the max of 16 samples), and 60-item stores (a live store has thousands of neighbours, which pushes unanswerable similarities up).
+  → input to `docs/changes/FR-309-language-recall-floor`; re-measure on a larger store before changing the constant.
+- **Verdict 2 — merge threshold 0.93 (TR-602): paraphrases are fine, but it is slightly too low.** Paraphrases score 0.93–1.00
+  (p10 0.97), so 100 % merge at 0.93. But ≈ 0.2 % of distinct-fact pairs also reach 0.93 and are silently fused (about 4 pairs en
+  of 1757); the **lowest merge threshold fusing no distinct pair is 0.946 en / 0.949 fr**. At 0.95 only 0.8 % of paraphrases
+  fall back to the LLM path. Cheap to raise (≈ 0.95) with a small cost; the fused-facts error is the dangerous one.
+- **Verdict 3 — disambiguate threshold 0.75 (TR-602) is effectively "always ask".** Distinct pairs have p10 0.76 en / 0.83 fr and
+  median 0.81 / 0.86, so **95 % (en) – 100 % (fr) of distinct pairs land in the LLM-disambiguation band**; same-domain distinct pairs
+  go up to 0.946. A value that separates would sit around 0.90, but that also swallows revisions (0.88–0.93). Caveat: all-pairs
+  overstates live cost (upsert only compares the best of a top-5), and the Ledger texts share the template "<Prénom> a …" which lifts
+  every similarity. The BACKLOG's "hypernym vs same-name-different-domain at 0.86–0.87" concern is consistent with this.
+- **Revisions sit in the middle** (0.85–0.96): below 0.93 they all go to the LLM path today (good: the old value must be replaced
+  deliberately), but raising merge to ≈ 0.95 keeps them safely out of auto-merge, whereas lowering it below 0.92 would auto-merge them.
+- **Sensitivity to the concept-naming rule (agreed check): the Verdicts do not move.** Safe cut-off 0.787 → 0.781 (en), 0.811 → 0.807
+  (fr); safe merge 0.946 → 0.946 / 0.949 → 0.949; paraphrase and distinct distributions shift by < 0.02. What does change is the
+  *height* of the gated-recall curve at a fixed floor (en at 0.84: 44 % → 37 %), i.e. including the name raises similarities by ≈ 0.01–0.02
+  — so naming affects the absolute numbers, not the calibration conclusions. Reference-LLM-written names are therefore **not** needed
+  for S1; revisit only if a Verdict is about to change a constant. The SPO-triple variant stays optional and unbuilt.
+- Method note: both sweeps embed with `embed_passage` on both sides, as the upsert path does (TR-601); the recall sweep uses
+  `embed_query` against passages, as live recall does.
+
+**2026-10-16 — S1.8 done: HNSW vs exact scan.** `mamemai-eval run ann --corpus v1` (suite `ann_vs_exact`, saved to `eval.run`); per Eval
+Language one store of 360 items (both Profiles, each fact + its 2 paraphrases = near-duplicates, the hard case for an ANN index),
+queried with all Probes (144 en / 147 fr) at depth 10 through the index and by brute force. 108+ tests green (unit tests with the Fake;
+guards below).
+- **Result: with pgvector's default `hnsw.ef_search` (40) the index returns exactly the exact top-10 for every query** — overlap@10 =
+  overlap@5 = top-1 agreement = 1.000, zero queries with any miss, in both languages. At this scale the HNSW index costs no recall.
+- **Positive control:** `ef_search = 1` drops overlap@10 to 0.124 (en) / 0.134 (fr), so the check can see misses; a perfect score is not
+  an artifact. (Top-1 still agrees 85 %: the graph entry point is near.)
+- **Limit of the evidence:** 360 items per store, one persona. HNSW degradation appears with size, not here. Two production-relevant risks
+  are therefore **unmeasured**: (a) recall at thousands of items; (b) **filtered search** — the product's concept search filters on
+  `persona_id`, which pgvector applies *after* the index returns `ef_search` candidates, so a persona with few concepts inside a store
+  full of another persona's (e.g. a tutor bundle with hundreds of vocabulary items) can get fewer than `top_n` rows, or none, even though
+  matches exist. The ef_search = 1 control shows the mechanism (overlap collapses once candidates are too few after filtering). A
+  multi-persona store check is the natural S1.8b; recorded in BACKLOG, not built.
+- **Method bug found and fixed (affects how to read S1.5):** on freshly loaded tables Postgres has no statistics until autovacuum runs, so
+  whether a search used a sequential scan or the HNSW index was arbitrary and could change mid-run. The worker now `ANALYZE`s after
+  indexing and the SUT takes an explicit access path (`planner` = what production would do; `index` = force HNSW; `exact` = force the scan).
+  `plan` evidence is recorded in the fingerprint and the check refuses to run if the "index" path is not an index scan or the "exact" path is
+  not a sequential scan (vacuous comparison). With 60-item stores the planner picks a sequential scan, so the S1.5 baseline is in effect
+  an exact search; **re-ran it after the fix: every Score identical**.
