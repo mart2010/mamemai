@@ -39,6 +39,10 @@ def main(argv: list[str] | None = None) -> int:
     prb.add_argument("--language", choices=["en", "fr"])
     prb.add_argument("--archetype", choices=[a.value for a in SpeechArchetype])
     prb.add_argument("--seed", type=int, default=1)
+    scn = gen.add_parser("scenarios", help="plan every Dialog's agenda from the Ledgers (deterministic, no Reference LLM)")
+    scn.add_argument("--language", choices=["en", "fr"])
+    scn.add_argument("--archetype", choices=[a.value for a in SpeechArchetype])
+    scn.add_argument("--seed", type=int, default=1, help="seed of the Profiles to plan for (as used by generate ledger)")
     cor = sub.add_parser("corpus", help="frozen, versioned Corpora").add_subparsers(dest="corpus_cmd", required=True)
     frz = cor.add_parser("freeze", help="freeze every Profile in the database into an immutable Corpus and export it")
     frz.add_argument("--version", required=True)
@@ -84,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_retrieval(args)
     if args.cmd == "sweep":
         return _sweep_retrieval(args)
+    if args.cmd == "generate" and args.gen_cmd == "scenarios":
+        return _generate_scenarios(args.language, args.archetype, args.seed)
     if args.cmd == "generate" and args.gen_cmd == "probes":
         return _generate_probes(args.language, args.archetype, args.seed)
     return 2
@@ -238,6 +244,49 @@ def _sweep_retrieval(args: argparse.Namespace) -> int:
     out.write_text("\n".join(report), encoding="utf-8")
     print(f"\nreport written to {out}")
     return 0
+
+
+def _generate_scenarios(language: str | None, archetype: str | None, seed: int) -> int:
+    from .usecases.plan_scenarios import PlanScenarios
+
+    with pg.connect() as conn:
+        repo = pg.PgEvalRepository(conn)
+        for (lang, arch), base in BRIEFS.items():
+            brief = dataclasses.replace(base, seed=seed)
+            if (language and lang.value != language) or (archetype and arch.value != archetype):
+                continue
+            if not repo.profile_exists(brief.profile_id):
+                print(f"{lang.value}/{arch.value}: no ledger yet, skipped")
+                continue
+            profile, ledger = repo.get_profile(brief.profile_id), repo.get_ledger(brief.profile_id)
+            scenarios = PlanScenarios().execute(profile, ledger)
+            repo.save_scenarios(profile.profile_id, scenarios)
+            worthy = sum(s.expects_episodes(ledger) for s in scenarios)
+            print(f"{lang.value}/{arch.value} ({profile.display_name}): {len(scenarios)} scenarios, {worthy} expect episodes, "
+                  f"{sum(s.target_turns for s in scenarios)} turns to write\n  review file: "
+                  f"{write_scenario_review(profile, ledger, scenarios)}")
+    return 0
+
+
+def write_scenario_review(profile: SyntheticUserProfile, ledger: Ledger, scenarios: list) -> Path:
+    DRAFTS.mkdir(exist_ok=True)
+    lines = [f"# Scenarios — {profile.display_name} ({profile.language.value} / {profile.archetype.value})", ""]
+    for s in scenarios:
+        label = "worthy (episodes expected)" if s.expects_episodes(ledger) else "no episodes expected"
+        lines += [f"## {s.scenario_id} — {s.kind.value} — {s.on_date} — mood: {s.mood} — ~{s.target_turns} turns — {label}", ""]
+        if s.topic:
+            lines += [f"*Writer instruction:* {s.topic}", ""]
+        revised = dict(s.revisions(ledger))
+        for fid in s.reveals:
+            f = ledger.get(fid)
+            old = f"  ⟵ replaces `{revised[fid]}`: {ledger.get(revised[fid]).text}" if fid in revised else ""
+            lines.append(f"- `{fid}` **{f.kind.value}** [{f.domain}] {f.text}{old}")
+        if s.omits:
+            lines += ["", "*Not yet told (must stay unsaid):* " + "; ".join(f"`{o}` {ledger.get(o).text}" for o in s.omits)]
+        lines.append("")
+    path = DRAFTS / f"scenarios_{profile.language.value}_{profile.archetype.value}.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
 
 
 def _generate_probes(language: str | None, archetype: str | None, seed: int = 1) -> int:

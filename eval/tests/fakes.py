@@ -76,6 +76,14 @@ class FakeEvalRepository:
     def get_probes(self, profile_id: UUID) -> list[Probe]:
         return list(self._probes.get(profile_id, []))
 
+    def save_scenarios(self, profile_id: UUID, scenarios) -> None:
+        self._guard(profile_id)
+        self._scenarios = getattr(self, "_scenarios", {})
+        self._scenarios[profile_id] = sorted(scenarios, key=lambda s: s.index)
+
+    def get_scenarios(self, profile_id: UUID):
+        return list(getattr(self, "_scenarios", {}).get(profile_id, []))
+
     def save_corpus(self, corpus: Corpus) -> None:
         if corpus.version in self._corpora:
             raise ValueError("corpus exists")

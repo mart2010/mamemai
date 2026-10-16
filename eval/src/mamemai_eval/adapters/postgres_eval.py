@@ -12,8 +12,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from ..domain.model import (
-    Corpus, EvalLanguage, FactKind, Ledger, LedgerFact, Probe, ProbeKind, Run, RunFingerprint, Score, SpeechArchetype, SyntheticUserProfile,
-    Tier,
+    Corpus, EvalLanguage, FactKind, Ledger, LedgerFact, Probe, ProbeKind, Run, RunFingerprint, Scenario, ScenarioKind, Score,
+    SpeechArchetype, SyntheticUserProfile, Tier,
 )
 from ..usecases.ports import FrozenCorpusError, ReferenceRequest, ReferenceResponse
 
@@ -121,6 +121,28 @@ class PgEvalRepository:
             "SELECT probe_id, kind, language, text, expected, hard_negatives FROM eval.probe "
             "WHERE profile_id = %s ORDER BY probe_id", (profile_id,)).fetchall()
         return [Probe(r[0], ProbeKind(r[1]), EvalLanguage(r[2]), r[3], tuple(r[4]), tuple(r[5])) for r in rows]
+
+    @_frozen_guard
+    def save_scenarios(self, profile_id: UUID, scenarios: list[Scenario]) -> None:
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.execute("DELETE FROM eval.scenario WHERE profile_id = %s", (profile_id,))
+            for s in scenarios:
+                if s.probes:
+                    raise ValueError("Scenario probes are not persisted yet")
+                if s.on_date is None:
+                    raise ValueError(f"{s.scenario_id}: on_date is required to persist a Scenario")
+                cur.execute(
+                    "INSERT INTO eval.scenario (profile_id, scenario_id, idx, kind, language, on_date, reveals, omits, "
+                    "target_turns, mood, topic) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (profile_id, s.scenario_id, s.index, s.kind.value, s.language.value, s.on_date, list(s.reveals),
+                     list(s.omits), s.target_turns, s.mood, s.topic))
+
+    def get_scenarios(self, profile_id: UUID) -> list[Scenario]:
+        rows = self._conn.execute(
+            "SELECT scenario_id, idx, kind, language, on_date, reveals, omits, target_turns, mood, topic "
+            "FROM eval.scenario WHERE profile_id = %s ORDER BY idx", (profile_id,)).fetchall()
+        return [Scenario(r[0], profile_id, r[1], EvalLanguage(r[3]), tuple(r[5]), tuple(r[6]), (), r[7], r[8],
+                         ScenarioKind(r[2]), r[4], r[9]) for r in rows]
 
     def save_corpus(self, corpus: Corpus) -> None:
         with self._conn.transaction(), self._conn.cursor() as cur:

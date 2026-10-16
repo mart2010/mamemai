@@ -15,6 +15,9 @@ If a term feels imprecise during design work, fix it here first, then everywhere
 | "episode" for a scripted dialog | *Episode* is a long-term **memory type** | **Scenario** (the plan) / **Dialog** (the realised text) |
 | "test" for an evaluation | `tests/` are pass/fail regression tests; evaluations yield graded **Scores** | **Suite** / **Run** |
 | "session" for a scenario | *Session* is a live websocket connection (spec) | **Scenario** |
+| **Scenario Kind** | What a **Scenario** is for: `disclosure` (the user tells the assistant about their life — carries **Ledger Facts**), or one of two fact-free negative cases for the worthiness gate: `small_talk` (phatic chat) and `assistant_operation` (talk about the assistant itself, which the spec's Worthiness criteria exclude). |
+| **Withheld fact** (a Scenario's `omits`) | A fact from a *later* Scenario, in a domain this one touches, that is already true at the Scenario's date but which the user does not tell yet — a trap for an extractor or assistant that fills in what was never said. Future events and revisions cannot be withheld. |
+| **Worthiness label** | Whether a Scenario should yield episodes: true iff the user tells at least one dated event (`Scenario.expects_episodes`). Concepts are not gated by worthiness, so an attribute-only Dialog may still yield concepts. |
 
 ## Terms
 

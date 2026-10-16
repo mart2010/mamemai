@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from ..domain.model import Corpus, Ledger, Probe, Run, SyntheticUserProfile
+from ..domain.model import Corpus, Ledger, Probe, Run, Scenario, SyntheticUserProfile
 
 
 class QuotaExhausted(Exception):
@@ -68,6 +68,12 @@ class EvalRepository(Protocol):
         ...
 
     def get_probes(self, profile_id: UUID) -> list[Probe]: ...
+
+    def save_scenarios(self, profile_id: UUID, scenarios: list[Scenario]) -> None:
+        """Replaces the Profile's Scenarios (drafts only)."""
+        ...
+
+    def get_scenarios(self, profile_id: UUID) -> list[Scenario]: ...
 
     def save_corpus(self, corpus: Corpus) -> None: ...
 

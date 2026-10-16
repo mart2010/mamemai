@@ -49,6 +49,15 @@ class ProbeKind(StrEnum):
     HARD_NEGATIVE = "hard_negative"
 
 
+class ScenarioKind(StrEnum):
+    """What a Dialog is *for*. Only DISCLOSURE Scenarios carry Ledger Facts; the other two are the
+    negative cases of the worthiness gate (spec Worthiness: gates episodes, and explicitly excludes
+    talk about the assistant's own operation)."""
+    DISCLOSURE = "disclosure"  # the user tells the assistant about their life (facts from the Ledger)
+    SMALL_TALK = "small_talk"  # phatic chat: greetings, banter; no personal event, nothing to remember
+    ASSISTANT_OPERATION = "assistant_operation"  # settings, voice, "how do you remember things"
+
+
 class Tier(StrEnum):
     T0 = "T0"
     T1 = "T1"
@@ -173,6 +182,15 @@ class Probe:
 
 @dataclass(frozen=True)
 class Scenario:
+    """The plan for one Dialog. `index` is the Ledger's scenario index for a DISCLOSURE (its facts have
+    `revealed_in == index`); the fact-free kinds are numbered after the last disclosure and dated after it.
+
+    - `omits`: facts from LATER Scenarios in domains this one touches that are ALREADY true at `on_date`
+      (an attribute, knowledge, or an event that has happened) — the user just does not tell them yet (a
+      trap for an extractor or assistant that fills in what was never said). Events still to come and
+      revisions (the old value is still true) are not omittable.
+    - `target_turns`: total Turns (user + assistant, spec term), a writing target not a constraint.
+    - `topic`: English instruction for the writer of a fact-free Dialog; empty for a DISCLOSURE."""
     scenario_id: str
     profile_id: UUID
     index: int
@@ -182,16 +200,49 @@ class Scenario:
     probes: tuple[Probe, ...] = ()
     target_turns: int = 12
     mood: str = "neutral"
+    kind: ScenarioKind = ScenarioKind.DISCLOSURE
+    on_date: date | None = None  # the fictional "today"; Dialog timestamps derive from it
+    topic: str = ""
+
+    def __post_init__(self) -> None:
+        if self.kind is not ScenarioKind.DISCLOSURE and (self.reveals or self.omits):
+            raise ValueError(f"a {self.kind} Scenario reveals and omits nothing")
+        if self.kind is ScenarioKind.DISCLOSURE and not self.reveals:
+            raise ValueError("a disclosure Scenario must reveal at least one fact")
+        if self.target_turns < 2:
+            raise ValueError("target_turns must be >= 2")
 
     def check_against(self, ledger: Ledger) -> None:
         """Raises if the agenda contradicts the Ledger (revealing a fact before/after its
-        scheduled Scenario, or both revealing and omitting one)."""
+        scheduled Scenario, both revealing and omitting one, or omitting a fact already told)."""
         for fid in self.reveals:
             if ledger.get(fid).revealed_in != self.index:
                 raise ValueError(f"{fid} is scheduled for scenario {ledger.get(fid).revealed_in}, not {self.index}")
         both = set(self.reveals) & set(self.omits)
         if both:
             raise ValueError(f"facts both revealed and omitted: {sorted(both)}")
+        for fid in self.omits:
+            if ledger.get(fid).revealed_in <= self.index:
+                raise ValueError(f"{fid} cannot be omitted: it is revealed in scenario {ledger.get(fid).revealed_in}, "
+                                 f"not after {self.index}")
+        for fid in self.omits:
+            f = ledger.get(fid)
+            if f.supersedes is not None:
+                raise ValueError(f"{fid} cannot be omitted: it is a revision, and the old value is still true now")
+            if f.happened_on is not None and self.on_date is not None and f.happened_on > self.on_date:
+                raise ValueError(f"{fid} cannot be omitted: it happens on {f.happened_on}, after this Scenario")
+        if self.on_date is not None and self.kind is ScenarioKind.DISCLOSURE and ledger.scenario_dates:
+            if ledger.scenario_dates[self.index] != self.on_date:
+                raise ValueError(f"on_date {self.on_date} differs from the Ledger's {ledger.scenario_dates[self.index]}")
+
+    def revisions(self, ledger: Ledger) -> tuple[tuple[str, str], ...]:
+        """(new_fact_id, superseded_fact_id) for each Fact Revision the user states in this Scenario."""
+        return tuple((f, ledger.get(f).supersedes) for f in self.reveals if ledger.get(f).supersedes)  # type: ignore[misc]
+
+    def expects_episodes(self, ledger: Ledger) -> bool:
+        """The worthiness label: the gate guards episodes, so a Dialog is worthy iff the user tells at least
+        one dated event. (Attributes and knowledge may still yield concepts — worthiness does not gate those.)"""
+        return any(ledger.get(f).kind is FactKind.EVENT for f in self.reveals)
 
 
 @dataclass(frozen=True)

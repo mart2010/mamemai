@@ -87,3 +87,24 @@ def test_scratch_schema_lifecycle_leaves_eval_schema_alone(conn):
 def test_only_scratch_schemas_can_be_dropped(conn, name):
     with pytest.raises(ValueError):
         pg.drop_scratch_schema(conn, name)
+
+
+def test_scenarios_round_trip_and_replace(repo):
+    from mamemai_eval.usecases.plan_scenarios import PlanScenarios
+
+    profile, ledger = _profile()
+    repo.save_profile_with_ledger(profile, ledger)
+    # the sample ledger has a scenario (2) with no fact: planning must refuse the hole, so plan on a gap-free one
+    gap_free = Ledger(ledger.profile_id, (ledger.get("f1"), ledger.get("f3"), ledger.get("f2")),
+                      (date(2026, 6, 8), date(2026, 6, 22), date(2026, 7, 13), date(2026, 8, 3)))
+    with pytest.raises(ValueError, match="hole"):
+        PlanScenarios().execute(profile, gap_free)
+    from dataclasses import replace
+    full = Ledger(ledger.profile_id, gap_free.facts + (
+        LedgerFact("f4", FactKind.KNOWLEDGE, "A appris que Jupiter est géante", 2, "astronomie", None, ()),), gap_free.scenario_dates)
+    scenarios = PlanScenarios().execute(profile, full)
+    repo.save_scenarios(profile.profile_id, scenarios)
+    assert repo.get_scenarios(profile.profile_id) == scenarios
+    repo.save_scenarios(profile.profile_id, scenarios[:2])  # replaces, does not append
+    assert [s.index for s in repo.get_scenarios(profile.profile_id)] == [0, 1]
+    assert replace(scenarios[0]) == repo.get_scenarios(profile.profile_id)[0]

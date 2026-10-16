@@ -50,7 +50,7 @@
 
 ## Slice 2 — Consolidation suite
 
-- [ ] S2.1 `GenerateScenarios` from Ledger (reveal / revise / omit / worthy-or-not agenda)
+- [x] S2.1 `PlanScenarios` from Ledger (reveal / revise / omit / worthy-or-not agenda)
 - [ ] S2.2 `WriteFrozenDialog` (Reference LLM, prompted with the profile's Style Target; regenerate until Style Conformance holds) + deterministic STT-noise injector
 - [ ] S2.3 Dialog → server session-log format adapter; Calibration Set: a small human-labelled realism check of synthetic dialogs, and review of the Style Targets themselves
 - [ ] S2.4 Freeze Corpus v2 (multi-Scenario dialogs, en + fr)
@@ -303,3 +303,26 @@ guards below).
   `plan` evidence is recorded in the fingerprint and the check refuses to run if the "index" path is not an index scan or the "exact" path is
   not a sequential scan (vacuous comparison). With 60-item stores the planner picks a sequential scan, so the S1.5 baseline is in effect
   an exact search; **re-ran it after the fix: every Score identical**.
+
+**2026-10-16 — S2.1 done: Scenarios planned from the Ledgers.** `mamemai-eval generate scenarios [--language L --archetype A]`
+(deterministic, seeded, **no Reference LLM**, so nothing to cache or spend); persisted in `eval.scenario` (migration `006`);
+review files `eval/drafts/scenarios_<lang>_<archetype>.md` (gitignored) for the user to read. 126 tests green. Domain: `Scenario`
+gained `kind`, `on_date`, `topic`, `revisions(ledger)`, `expects_episodes(ledger)` and stricter `check_against`; `ScenarioKind` and
+three glossary entries added.
+- **Result:** 8 Scenarios per Profile = 6 disclosures (the Ledger's schedule, 9–11 facts each) + 2 fact-free (small talk, assistant
+  operation), 32 in all; 6 of 8 per Profile expect episodes, the 2 fact-free ones do not. Turns to write: 258 per hesitant Profile,
+  198 per fluent (≈ 40 / 30 turns per disclosure; fact-free 8 and 10).
+- **D5 extended, flagged:** D5 fixed 6 Scenarios per Profile (24). Every one of them carries ≥ 3 events, so **the frozen v1 Ledgers
+  contain no non-worthy Scenario at all**; without negatives the worthiness gate could not be scored. The 2 extra fact-free Scenarios per
+  Profile (+8, cheap: short Dialogs) are therefore added; they are planned after the last disclosure (indices 6–7, dated +7 and +14 days).
+  If this is not wanted, drop `FACT_FREE_TOPICS` and the label disappears for the whole suite.
+- **Worthiness label from the spec:** worthiness gates *episodes only* (spec glossary), so the label is "tells ≥ 1 dated event". An
+  attribute/knowledge-only disclosure would be a "not worthy but concepts expected" case; the current Ledgers have none (all 6 contain events).
+- **Density caveat:** 10 facts per Dialog, for a hesitant speaker ≈ 20 user turns. S2.2 must check coverage (every `key_terms` present in the
+  user's turns) and regenerate otherwise; it is the first place this plan can turn out unrealistic.
+- **Bug caught in review, fixed:** the first `omits` rule listed events still in the future (a batch of flapjacks burnt on 06-20 as "not yet
+  told" in a Dialog dated 06-08) and revisions ("swims instead of running" before the ankle injury). Both are now rejected by the domain
+  (`check_against`) and never chosen by the planner. **Known residual:** an attribute can implicitly depend on a later fact (a Garmin watch for
+  swimming, before the user swims); the Ledger has no dependency links, so this is left to the review of the drafts.
+- **Not yet guarded:** Scenarios of the frozen v1 Profiles can still be replaced; the immutability trigger is added to `eval.scenario` and
+  `eval.dialog` when Corpus v2 is frozen (S2.4). The canonical file set / digest also becomes per-version at that point (`FILES` is global today).
